@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import axios from 'axios';
+import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { getProductImage } from '../utils/productImages';
-
-// Prefer direct backend URL via env to avoid dev-proxy issues
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 const Home = () => {
   const { user } = useAuth();
@@ -25,20 +22,12 @@ const Home = () => {
     'https://images.unsplash.com/photo-1503350659573-076be1027134?w=2070&auto=format&fit=crop&q=80&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTAwfHxqZXdlbHJ5fGVufDB8MHwwfHx8MA%3D%3D',
   ];
 
-  // Debug: confirm API base URL at runtime
-  useEffect(() => {
-    console.debug('[Home] API_BASE_URL =', API_BASE_URL);
-  }, []);
-
   useEffect(() => {
     // Fetch featured products with diverse categories and materials
     const fetchProducts = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/products/featured`);
-        if (!res.ok) throw new Error(`Network response was not ok: ${res.status}`);
-        const data = await res.json();
-        
-        setFeaturedProducts(data.products || []);
+        const res = await api.get('/products/featured');
+        setFeaturedProducts(res.data.products || []);
       } catch (err) {
         console.error('Error fetching featured products:', err);
         setError('Failed to load featured products. Please try again later.');
