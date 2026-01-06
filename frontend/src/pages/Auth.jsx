@@ -38,7 +38,7 @@ const Auth = () => {
       if (mode === 'login') {
         if (isAdminLogin) {
           // Admin login
-          const response = await api.post('/api/admin/login', {
+          const response = await api.post('/admin/login', {
             email,
             password,
             adminKey
