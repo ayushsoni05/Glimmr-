@@ -8,6 +8,9 @@ export default defineConfig(({ mode }) => {
   const target = env.VITE_BACKEND_URL || 'http://127.0.0.1:5002'
   return {
     plugins: [react()],
+      build: {
+        outDir: 'dist',
+      },
     server: {
       host: '127.0.0.1', // Force IPv4
       port: 5173,
