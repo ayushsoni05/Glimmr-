@@ -6,8 +6,13 @@ import axios from 'axios';
 let API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // If VITE_API_URL is a full URL without /api suffix, add it automatically
-if (API_BASE_URL.startsWith('http') && !API_BASE_URL.endsWith('/api')) {
-  API_BASE_URL = API_BASE_URL.replace(/\/$/, '') + '/api';
+if (API_BASE_URL.startsWith('http')) {
+  // Remove any trailing slashes first
+  API_BASE_URL = API_BASE_URL.replace(/\/+$/, '');
+  // Add /api if not present
+  if (!API_BASE_URL.endsWith('/api')) {
+    API_BASE_URL = API_BASE_URL + '/api';
+  }
 }
 
 // Debug: surface the resolved base URL
