@@ -24,9 +24,7 @@ const DiamondPricingManager = () => {
   const fetchConfig = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/admin/diamond-pricing', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.get('/admin/diamond-pricing');
       setConfig(res.data.config);
     } catch (error) {
       console.error('Error fetching diamond pricing:', error);
@@ -54,9 +52,7 @@ const DiamondPricingManager = () => {
     try {
       setSaving(true);
       setMessage('');
-      await api.put('/admin/diamond-pricing', config, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.put('/admin/diamond-pricing', config);
       setMessage('✓ Diamond pricing configuration saved successfully!');
       setTimeout(() => setMessage(''), 3000);
     } catch (error) {
@@ -75,9 +71,7 @@ const DiamondPricingManager = () => {
     try {
       setRecalculating(true);
       setMessage('');
-      const res = await api.post('/admin/recalc-diamond', {}, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.post('/admin/recalc-diamond', {});
       setMessage(`✓ ${res.data.message} (${res.data.updated}/${res.data.total} products updated)`);
       setTimeout(() => setMessage(''), 5000);
     } catch (error) {
@@ -90,9 +84,7 @@ const DiamondPricingManager = () => {
 
   const handlePreviewCalculation = async () => {
     try {
-      const res = await api.post('/admin/calculate-diamond-price', previewForm, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.post('/admin/calculate-diamond-price', previewForm);
       setPreviewCalc(res.data);
     } catch (error) {
       console.error('Error calculating preview:', error);
@@ -369,6 +361,7 @@ const DiamondPricingManager = () => {
 };
 
 export default DiamondPricingManager;
+
 
 
 
