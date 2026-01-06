@@ -38,6 +38,14 @@ const Auth = () => {
       if (mode === 'login') {
         if (isAdminLogin) {
           // Admin login
+          console.log('[Auth] Admin login attempt:', { 
+            email, 
+            hasPassword: !!password, 
+            hasAdminKey: !!adminKey,
+            emailLength: email?.length,
+            passwordLength: password?.length,
+            adminKeyLength: adminKey?.length
+          });
           const response = await api.post('/auth/admin-login', {
             email,
             password,
