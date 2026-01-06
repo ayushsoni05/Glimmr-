@@ -208,8 +208,37 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/recommend', recommendRoutes);
 app.use('/api/prices', priceRoutes);
 
+// Root endpoint - Useful for Render and deployment platforms
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Glimmr API Server', 
+    status: 'running',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      products: '/api/products',
+      cart: '/api/cart',
+      orders: '/api/orders',
+      user: '/api/user',
+      admin: '/api/admin',
+      recommend: '/api/recommend',
+      prices: '/api/prices'
+    }
+  });
+});
+
 // Health endpoint
 app.get('/api/health', (req, res) => res.json({ ok: true, env: process.env.NODE_ENV || 'development' }));
+
+// Catch-all route for undefined routes - must be before error handler
+app.use('*', (req, res) => {
+  res.status(404).json({ 
+    error: 'Route not found', 
+    message: `Cannot ${req.method} ${req.originalUrl}`,
+    availableEndpoints: '/api/auth, /api/products, /api/cart, /api/orders, /api/user, /api/admin, /api/recommend, /api/prices'
+  });
+});
 
 // Generic error handler (returns JSON) — helps avoid HTML error pages breaking API clients
 app.use((err, req, res, next) => {
