@@ -14,7 +14,7 @@ const { sendOtpViaSms } = require('../utils/fast2sms');
 
 
 const router = express.Router();
-const { authLimiter, verifyLimiter } = require('../middleware/rateLimiter');
+const { authLimiter, otpRequestLimiter, verifyLimiter } = require('../middleware/rateLimiter');
 
 const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES || '10', 10);
 const OTP_MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS || '5', 10);
@@ -601,7 +601,7 @@ router.post('/verify-email', async (req, res) => {
   }
 });
 
-router.post('/request-otp-login', async (req, res) => {
+router.post('/request-otp-login', otpRequestLimiter, async (req, res) => {
   try {
     const identity = resolveIdentity(req.body);
     if (!identity) {
