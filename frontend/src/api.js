@@ -3,7 +3,12 @@ import axios from 'axios';
 // Use a relative API path by default so Vite's dev server proxy handles backend requests.
 // This avoids hard-coding backend ports and prevents ERR_CONNECTION_REFUSED when backend
 // moves between ports during local development.
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+let API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+
+// If VITE_API_URL is a full URL without /api suffix, add it automatically
+if (API_BASE_URL.startsWith('http') && !API_BASE_URL.endsWith('/api')) {
+  API_BASE_URL = API_BASE_URL.replace(/\/$/, '') + '/api';
+}
 
 // Debug: surface the resolved base URL
 console.debug('[api] baseURL =', API_BASE_URL);
