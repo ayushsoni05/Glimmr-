@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../api';
 
 const DiamondPricingManager = () => {
   const [config, setConfig] = useState(null);
@@ -24,8 +24,7 @@ const DiamondPricingManager = () => {
   const fetchConfig = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const res = await axios.get('http://localhost:5002/api/admin/diamond-pricing', {
+      const res = await api.get('/admin/diamond-pricing', {
         headers: { Authorization: `Bearer ${token}` },
       });
       setConfig(res.data.config);
@@ -55,8 +54,7 @@ const DiamondPricingManager = () => {
     try {
       setSaving(true);
       setMessage('');
-      const token = localStorage.getItem('token');
-      await axios.put('http://localhost:5002/api/admin/diamond-pricing', config, {
+      await api.put('/admin/diamond-pricing', config, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setMessage('✓ Diamond pricing configuration saved successfully!');
@@ -77,8 +75,7 @@ const DiamondPricingManager = () => {
     try {
       setRecalculating(true);
       setMessage('');
-      const token = localStorage.getItem('token');
-      const res = await axios.post('http://localhost:5002/api/admin/recalc-diamond', {}, {
+      const res = await api.post('/admin/recalc-diamond', {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setMessage(`✓ ${res.data.message} (${res.data.updated}/${res.data.total} products updated)`);
@@ -93,8 +90,7 @@ const DiamondPricingManager = () => {
 
   const handlePreviewCalculation = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post('http://localhost:5002/api/admin/calculate-diamond-price', previewForm, {
+      const res = await api.post('/admin/calculate-diamond-price', previewForm, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setPreviewCalc(res.data);
@@ -373,3 +369,6 @@ const DiamondPricingManager = () => {
 };
 
 export default DiamondPricingManager;
+
+
+
