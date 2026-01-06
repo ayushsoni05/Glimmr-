@@ -38,16 +38,16 @@ const Auth = () => {
       if (mode === 'login') {
         if (isAdminLogin) {
           // Admin login
-          console.log('[Auth] Admin login attempt:', { 
-            email, 
-            hasPassword: !!password, 
-            hasAdminKey: !!adminKey,
-            emailLength: email?.length,
-            passwordLength: password?.length,
-            adminKeyLength: adminKey?.length
-          });
+          console.log('[Auth] Admin login attempt:', { email, hasPassword: !!password, hasAdminKey: !!adminKey });
+          
+          if (!email || !password || !adminKey) {
+            setError('Email, password and admin key are all required');
+            setLoading(false);
+            return;
+          }
+
           const response = await api.post('/auth/admin-login', {
-            email,
+            email: email.toLowerCase().trim(),
             password,
             adminKey
           });

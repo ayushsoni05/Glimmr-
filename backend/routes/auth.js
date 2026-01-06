@@ -1016,18 +1016,17 @@ router.post('/firebase-login', authLimiter, async (req, res) => {
 router.post('/admin-login', authLimiter, async (req, res) => {
   try {
     const { email, password, adminKey } = req.body;
-    console.log('[ADMIN_LOGIN] Request received:', {
-      hasEmail: !!email,
-      hasPassword: !!password,
+    console.log('[ADMIN_LOGIN] Request received:', { 
+      hasEmail: !!email, 
+      hasPassword: !!password, 
       hasAdminKey: !!adminKey,
-      emailLength: email?.length,
-      passwordLength: password?.length,
-      adminKeyLength: adminKey?.length,
-      bodyKeys: Object.keys(req.body)
+      emailLength: email ? email.length : 0,
+      passwordLength: password ? password.length : 0,
+      adminKeyLength: adminKey ? adminKey.length : 0
     });
     
     if (!email || !password || !adminKey) {
-      console.log('[ADMIN_LOGIN] Validation failed - missing fields');
+      console.error('[ADMIN_LOGIN] Missing required fields:', { email: !!email, password: !!password, adminKey: !!adminKey });
       return res.status(400).json({ error: 'Email, password and admin key are required' });
     }
 
