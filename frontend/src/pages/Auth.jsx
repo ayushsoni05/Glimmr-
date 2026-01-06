@@ -57,7 +57,8 @@ const Auth = () => {
           localStorage.setItem('user', JSON.stringify(userData));
           api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
           setUser(userData);
-          navigate('/admin');
+          navigate('/#/admin');
+          window.location.href = '/#/admin';  // Force reload to ensure admin page loads
         } else {
           // Regular login
           const result = await login(email, password);
