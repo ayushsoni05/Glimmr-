@@ -5,6 +5,12 @@ import axios from 'axios';
 // moves between ports during local development.
 let API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
+// Production fallback: if no env var is set and we're on the deployed domain, use the backend URL
+if (API_BASE_URL === '/api' && typeof window !== 'undefined' && window.location.hostname.includes('render.com')) {
+  API_BASE_URL = 'https://glimmr-jewellry-e-commerce-platform-5.onrender.com/api';
+  console.log('[api] Using production backend fallback');
+}
+
 // If VITE_API_URL is a full URL without /api suffix, add it automatically
 if (API_BASE_URL.startsWith('http')) {
   // Remove any trailing slashes first
@@ -64,4 +70,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-
