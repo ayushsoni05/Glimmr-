@@ -1,0 +1,1125 @@
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
+// Twilio removed: prefer Firebase client-side phone auth
+const crypto = require('crypto');
+const admin = require('firebase-admin');
+const User = require('../models/User');
+const fs = require('fs');
+const path = require('path');
+const { validateEmail } = require('../utils/emailValidator');
+const { sendSignupNotificationToAdmin, sendSuspiciousActivityAlert, sendLoginNotificationToAdmin } = require('../utils/adminNotification');
+const { sendOtpViaSms } = require('../utils/fast2sms');
+
+
+const router = express.Router();
+const { authLimiter, verifyLimiter } = require('../middleware/rateLimiter');
+
+const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES || '10', 10);
+const OTP_MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS || '5', 10);
+const OTP_RESEND_INTERVAL_MS =
+  parseInt(process.env.OTP_RESEND_INTERVAL_SECONDS || '60', 10) * 1000;
+const OTP_LOCK_DURATION_MS =
+  parseInt(process.env.OTP_LOCK_DURATION_MINUTES || '10', 10) * 60 * 1000;
+const JWT_SECRET = process.env.JWT_SECRET || 'secret';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+
+// Firebase Admin initialization is handled in `server.js` so the app can
+// initialize it from a service account path or key and expose it via
+// `app.locals.firebaseAdmin` and `app.locals.firebaseEnabled`.
+// We still `require('firebase-admin')` here to access the module if it
+// was initialized by the server process, but we do not initialize it here.
+
+const mailTransport = createMailTransport();
+// Server-side SMS provider removed in favor of Firebase client-side phone auth
+
+// Lightweight audit log for SMS/Verify events (non-sensitive metadata)
+const smsAuditLogFile = path.join(__dirname, '..', 'logs', 'sms_audit.log');
+function auditSmsEvent(event) {
+  try {
+    fs.mkdirSync(path.dirname(smsAuditLogFile), { recursive: true });
+    const out = Object.assign({ ts: new Date().toISOString() }, event);
+    fs.appendFileSync(smsAuditLogFile, JSON.stringify(out) + '\n');
+  } catch (err) {
+    console.error('SMS audit log error:', err && err.message ? err.message : err);
+  }
+}
+
+function createMailTransport() {
+  if (
+    process.env.SMTP_HOST &&
+    process.env.SMTP_PORT &&
+    process.env.SMTP_USER &&
+    process.env.SMTP_PASS
+  ) {
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+  }
+
+  console.warn(
+    'SMTP credentials not configured. Falling back to console email logger. Configure SMTP_* env vars for production.'
+  );
+  return nodemailer.createTransport({
+    jsonTransport: true,
+  });
+}
+
+// NOTE: Twilio has been removed. For phone verification, use Firebase client-side
+// phone authentication. The backend will verify Firebase ID tokens via the
+// `/auth/firebase-login` endpoint (requires `FIREBASE_SERVICE_ACCOUNT_KEY` or
+// `FIREBASE_SERVICE_ACCOUNT_PATH` to be set). Server-side SMS sending is no
+// longer supported in this project.
+
+const CONTACT_TYPES = {
+  EMAIL: 'email',
+  PHONE: 'phone',
+};
+
+const normalizeEmail = (email) => (email || '').trim().toLowerCase();
+const normalizePhone = (phone) => {
+  // Enforce Indian phone numbers only (E.164 +91XXXXXXXXXX)
+  if (!phone) return '';
+  const raw = String(phone).trim();
+  const digits = raw.replace(/[^\d]/g, '');
+  if (!digits) return '';
+
+  // Remove leading zeros
+  const cleaned = digits.replace(/^0+/, '');
+
+  // If user provided national 10-digit number, assume India and prefix 91
+  if (cleaned.length === 10) {
+    return `+91${cleaned}`;
+  }
+
+  // If user provided country code +91 or 91 prefixed number (e.g. 9198... -> 12 digits), accept it
+  if (cleaned.length === 12 && cleaned.startsWith('91')) {
+    return `+${cleaned}`;
+  }
+
+  // Already E.164 with leading '91' (rare case where + included and digits length 12)
+  if (raw.startsWith('+') && cleaned.length === 12 && cleaned.startsWith('91')) {
+    return `+${cleaned}`;
+  }
+
+  // Otherwise, not an Indian phone number we accept
+  return '';
+};
+
+const resolveIdentity = (body = {}) => {
+  const email = normalizeEmail(body.email);
+  if (email) {
+    return { field: 'email', value: email, raw: email, channel: CONTACT_TYPES.EMAIL };
+  }
+
+  const rawPhone = body.phone !== undefined ? String(body.phone).trim() : '';
+  const phone = normalizePhone(rawPhone);
+  if (phone || rawPhone) {
+    // Keep both normalized and raw to increase chances of matching legacy-stored numbers
+    return { field: 'phone', value: phone, raw: rawPhone, channel: CONTACT_TYPES.PHONE };
+  }
+
+  return null;
+};
+
+async function findUserByIdentity(identity) {
+  if (!identity) return null;
+
+  if (identity.channel === CONTACT_TYPES.PHONE) {
+    const candidates = new Set();
+    
+    // Add normalized value (+91XXXXXXXXXX)
+    if (identity.value) candidates.add(identity.value);
+    
+    // Add raw input as-is
+    if (identity.raw) candidates.add(identity.raw);
+    
+    // Extract and add various digit formats
+    const allDigits = (identity.raw || identity.value || '').replace(/[^\d]/g, '');
+    if (allDigits) {
+      // 10-digit format (most common in DB)
+      if (allDigits.length === 10) {
+        candidates.add(allDigits); // Plain 10 digits
+        candidates.add(`+91${allDigits}`); // E.164 format
+      }
+      // 12-digit with country code (91XXXXXXXXXX)
+      else if (allDigits.length === 12 && allDigits.startsWith('91')) {
+        const tenDigit = allDigits.substring(2);
+        candidates.add(tenDigit); // 10 digits
+        candidates.add(allDigits); // 12 digits
+        candidates.add(`+${allDigits}`); // +91XXXXXXXXXX
+      }
+      // Also try the full digits as-is
+      candidates.add(allDigits);
+    }
+    
+    const list = Array.from(candidates).filter(Boolean);
+    console.log('[AUTH] Searching for user with phone candidates:', list);
+    
+    if (list.length === 0) return null;
+    
+    const user = await User.findOne({ phone: { $in: list } });
+    console.log('[AUTH] User found:', user ? `Yes (${user.email || user.phone})` : 'No');
+    return user;
+  }
+
+  return User.findOne({ [identity.field]: identity.value });
+}
+
+const generateOtp = () => crypto.randomInt(100000, 999999).toString();
+
+const buildOtpExpiry = () =>
+  new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+async function sendOtpEmail(email, otp, context) {
+  console.log('[OTP_EMAIL] Attempting to send OTP email...');
+  console.log('[OTP_EMAIL] To:', email);
+  console.log('[OTP_EMAIL] Context:', context);
+  console.log('[OTP_EMAIL] SMTP Config:', {
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    user: process.env.SMTP_USER,
+    from: process.env.MAIL_FROM || process.env.SMTP_USER
+  });
+
+  const subject = `Your ${context} OTP - Glimmr`;
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; background: #f9f9f9; border-radius: 8px; }
+          .header { background: linear-gradient(135deg, #c9b896 0%, #a89770 100%); color: white; padding: 30px 20px; border-radius: 8px 8px 0 0; text-align: center; }
+          .content { background: white; padding: 30px; border-radius: 0 0 8px 8px; text-align: center; }
+          .otp-code { font-size: 32px; font-weight: bold; color: #c9b896; letter-spacing: 8px; padding: 20px; background: #f8f8f8; border-radius: 8px; margin: 20px 0; }
+          .footer { text-align: center; padding: 15px; color: #999; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h2 style="margin: 0;">Glimmr Jewelry</h2>
+            <p style="margin: 5px 0 0 0;">Your Verification Code</p>
+          </div>
+          <div class="content">
+            <p>Hello,</p>
+            <p>Your OTP for ${context} is:</p>
+            <div class="otp-code">${otp}</div>
+            <p>This OTP will expire in <strong>${OTP_EXPIRY_MINUTES} minutes</strong>.</p>
+            <p>If you did not request this code, please ignore this email.</p>
+          </div>
+          <div class="footer">
+            <p>This is an automated email from Glimmr. Please do not reply.</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const message = {
+    from: `"Glimmr Jewelry" <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
+    to: email,
+    subject,
+    text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
+    html,
+  };
+
+  try {
+    const result = await mailTransport.sendMail(message);
+    console.log('[OTP_EMAIL] ✅ Email sent successfully');
+    console.log('[OTP_EMAIL] Message ID:', result && result.messageId);
+    console.log('[OTP_EMAIL] Response:', result && result.response);
+    console.log('[OTP_EMAIL] Accepted:', result && result.accepted);
+    console.log('[OTP_EMAIL] Rejected:', result && result.rejected);
+    if (result && result.rejected && result.rejected.length) {
+      console.warn('[OTP_EMAIL] Warning: Some recipients were rejected by SMTP');
+    }
+    return result;
+  } catch (error) {
+    console.error('[OTP_EMAIL] ❌ Failed to send email:', error.message);
+    console.error('[OTP_EMAIL] Error details:', error);
+    throw error;
+  }
+}
+
+async function sendOtpSms(phone, otp, context) {
+  // Use Fast2SMS to send OTP via SMS
+  if (!phone) {
+    throw new Error('Phone number is required');
+  }
+
+  try {
+    console.log('[SMS] Sending OTP via Fast2SMS to:', phone);
+    const result = await sendOtpViaSms(phone, otp, context);
+    console.log('[SMS] ✅ OTP sent successfully via Fast2SMS');
+    return result;
+  } catch (error) {
+    console.error('[SMS] ❌ Failed to send OTP via Fast2SMS:', error.message);
+    throw new Error(`Failed to send SMS: ${error.message}`);
+  }
+}
+
+async function issueOtp(user, context, channel = CONTACT_TYPES.EMAIL) {
+  const otp = generateOtp();
+  const hashedOtp = await bcrypt.hash(otp, 10);
+
+  console.log('[OTP] Generated OTP for user:', user.email || user.phone);
+  console.log('[OTP] Context:', context);
+  console.log('[OTP] Channel:', channel);
+
+  user.otp = hashedOtp;
+  user.otpExpiry = buildOtpExpiry();
+  user.otpAttempts = 0;
+  user.otpLockedUntil = undefined;
+  user.lastOtpSentAt = new Date();
+  await user.save();
+
+  if (channel === CONTACT_TYPES.PHONE) {
+    // Send OTP via Fast2SMS
+    try {
+      await sendOtpSms(user.phone, otp, context);
+      console.log('[OTP] SMS sent successfully to:', user.phone);
+    } catch (smsError) {
+      console.error('[OTP] Failed to send SMS:', smsError.message);
+      // Revert OTP save if SMS fails
+      user.otp = undefined;
+      user.otpExpiry = undefined;
+      user.lastOtpSentAt = undefined;
+      await user.save();
+      throw new Error('Failed to send OTP SMS. Please try again.');
+    }
+  } else if (channel === CONTACT_TYPES.EMAIL) {
+    // Send OTP via email
+    try {
+      await sendOtpEmail(user.email, otp, context);
+      console.log('[OTP] Email sent successfully to:', user.email);
+    } catch (emailError) {
+      console.error('[OTP] Failed to send email:', emailError.message);
+      // Revert OTP save if email fails
+      user.otp = undefined;
+      user.otpExpiry = undefined;
+      user.lastOtpSentAt = undefined;
+      await user.save();
+      throw new Error('Failed to send OTP email. Please try again.');
+    }
+  } else {
+    // Shouldn't reach here; defensive check
+    throw new Error('Unable to deliver OTP: unsupported channel.');
+  }
+}
+
+router.post('/signup', authLimiter, async (req, res) => {
+  try {
+    console.log('[AUTH] signup attempt');
+    const { name, email, phone, password } = req.body;
+
+    if (!name || !email || !phone || !password) {
+      return res.status(400).json({ error: 'Name, email, phone, and password are required' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedPhone = normalizePhone(phone); // Normalize phone number
+
+    // Email validation: format and disposable domain check
+    const emailValidation = validateEmail(normalizedEmail);
+    if (!emailValidation.isValid) {
+      return res.status(400).json({ 
+        error: 'Invalid email',
+        message: emailValidation.error,
+        code: 'INVALID_EMAIL'
+      });
+    }
+
+    if (!normalizedPhone) {
+      return res.status(400).json({ 
+        error: 'Invalid phone number',
+        message: 'Please provide a valid 10-digit Indian mobile number'
+      });
+    }
+
+    if (normalizedEmail === 'glimmr05@gmail.com') {
+      console.warn('Signup attempt using reserved admin email');
+    }
+
+    // Check for existing user by email or phone (check multiple phone formats)
+    const phoneDigits = normalizedPhone.replace(/\D/g, '');
+    const phoneCandidates = [
+      normalizedPhone,
+      phoneDigits,
+      phoneDigits.length === 12 ? phoneDigits.substring(2) : null
+    ].filter(Boolean);
+
+    const existingUser = await User.findOne({
+      $or: [
+        { email: normalizedEmail },
+        { phone: { $in: phoneCandidates } }
+      ]
+    });
+    
+    if (existingUser) {
+      if (existingUser.email === normalizedEmail) {
+        return res.status(409).json({ error: 'Email already registered. Please log in.' });
+      }
+      if (existingUser.phone) {
+        return res.status(409).json({ error: 'Phone number already registered. Please log in.' });
+      }
+      return res.status(409).json({ error: 'User already exists. Please log in.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(String(password), 10);
+
+    // Generate verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    // Extract IP and device info from request
+    const clientIp = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+
+    const user = new User({
+      name: name.trim(),
+      email: normalizedEmail,
+      phone: normalizedPhone, // Use normalized phone format
+      password: hashedPassword,
+      role: 'user',
+      emailVerified: false,
+      verificationToken,
+      verificationTokenExpiry,
+      addresses: [],
+      signupIp: clientIp,
+      signupDeviceInfo: userAgent,
+      isActive: true,
+      loginCount: 0
+    });
+
+    await user.save();
+
+    // Send verification email
+    const verificationLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify-email?token=${verificationToken}&email=${normalizedEmail}`;
+    const emailHtml = `
+      <p>Hello ${user.name},</p>
+      <p>Welcome to Glimmr! Please verify your email address to complete your registration.</p>
+      <p><a href="${verificationLink}" style="padding: 10px 20px; background-color: #C5A572; color: white; text-decoration: none; border-radius: 5px; display: inline-block;">Verify Email</a></p>
+      <p>This link expires in 24 hours.</p>
+      <p>If you didn't create this account, you can ignore this email.</p>
+    `;
+
+    try {
+      await mailTransport.sendMail({
+        from: process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local',
+        to: normalizedEmail,
+        subject: 'Verify your Glimmr account',
+        text: `Welcome to Glimmr! Please verify your email at ${verificationLink}`,
+        html: emailHtml
+      });
+    } catch (mailErr) {
+      console.error('[AUTH] Failed to send verification email:', mailErr.message);
+    }
+
+    // Send admin notification about new signup
+    try {
+      await sendSignupNotificationToAdmin(user, {
+        ip: clientIp,
+        userAgent: userAgent
+      });
+    } catch (notifyErr) {
+      console.error('[AUTH] Failed to send admin notification:', notifyErr.message);
+    }
+
+    const token = jwt.sign(
+      { id: user._id, email: user.email, phone: user.phone },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    return res.status(201).json({
+      message: 'Account created successfully. Please verify your email.',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        emailVerified: user.emailVerified,
+        addresses: user.addresses
+      }
+    });
+  } catch (error) {
+    console.error('Signup error:', error && error.message ? error.message : error);
+    return res.status(500).json({ error: 'Unable to process signup request' });
+  }
+});
+
+router.post('/login', authLimiter, async (req, res) => {
+  try {
+    const identity = resolveIdentity(req.body);
+    if (!identity) {
+      return res.status(400).json({ error: 'Phone number or email is required' });
+    }
+    // Both email and phone are accepted as identity fields. Phone verification
+    // is expected to be performed client-side via Firebase when configured.
+    const { password, adminKey } = req.body;
+    const user = await findUserByIdentity(identity);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found. Please sign up first.' });
+    }
+
+    // If password provided, try password-login
+    if (password) {
+      if (!user.password) {
+        return res.status(400).json({ error: 'Password login not available for this account' });
+      }
+
+      const match = await bcrypt.compare(String(password), user.password);
+      if (!match) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // If adminKey provided, verify for admin login
+      if (adminKey) {
+        if (user.role !== 'admin') {
+          return res.status(403).json({ error: 'Admin access required' });
+        }
+        if (!user.adminKey || !(await bcrypt.compare(adminKey, user.adminKey))) {
+          return res.status(401).json({ error: 'Invalid admin key' });
+        }
+      }
+
+      // Update login tracking
+      const clientIp = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
+      const userAgent = req.headers['user-agent'] || 'unknown';
+      
+      user.lastLogin = new Date();
+      user.lastIp = clientIp;
+      user.deviceInfo = userAgent;
+      user.loginCount = (user.loginCount || 0) + 1;
+      user.isActive = true;
+      await user.save();
+
+      // Send admin notification
+      await sendLoginNotificationToAdmin(user, {
+        ip: clientIp,
+        userAgent: userAgent
+      });
+
+      // Generate JWT token
+      const token = jwt.sign(
+        { id: user._id, email: user.email, phone: user.phone },
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRES_IN }
+      );
+
+      return res.json({
+        message: 'Logged in successfully',
+        token,
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          addresses: user.addresses
+        }
+      });
+    }
+
+    // Otherwise proceed with OTP flow (passwordless)
+    if (user.otpLockedUntil && user.otpLockedUntil > new Date()) {
+      const seconds = Math.ceil((user.otpLockedUntil.getTime() - Date.now()) / 1000);
+      return res.status(429).json({ error: `Too many attempts. Please wait ${seconds} seconds before requesting another OTP.` });
+    }
+
+    if (user.lastOtpSentAt && Date.now() - user.lastOtpSentAt.getTime() < OTP_RESEND_INTERVAL_MS) {
+      const waitTime = Math.ceil((OTP_RESEND_INTERVAL_MS - (Date.now() - user.lastOtpSentAt.getTime())) / 1000);
+      res.setHeader('Retry-After', waitTime);
+      return res.status(429).json({ error: `OTP already sent. Please wait ${waitTime} seconds before requesting again.` });
+    }
+
+    try {
+      await issueOtp(user, 'login', identity.channel);
+      return res.json({ message: 'An OTP has been sent to your phone. Enter it to continue.' });
+    } catch (otpError) {
+      console.error('[AUTH] Failed to send login OTP:', otpError.message);
+      return res.status(500).json({ error: 'Unable to deliver OTP at the moment. Please confirm your number or try again later.' });
+    }
+  } catch (error) {
+    console.error('Login OTP error:', error);
+    return res.status(500).json({ error: 'Unable to process login request' });
+  }
+});
+
+router.post('/verify-email', async (req, res) => {
+  try {
+    const { token, email } = req.body;
+    if (!token || !email) {
+      return res.status(400).json({ error: 'Token and email are required' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.emailVerified) {
+      return res.status(400).json({ error: 'Email already verified' });
+    }
+
+    if (!user.verificationToken || user.verificationToken !== token) {
+      return res.status(400).json({ error: 'Invalid verification token' });
+    }
+
+    if (user.verificationTokenExpiry < new Date()) {
+      return res.status(400).json({ error: 'Verification token expired. Please signup again.' });
+    }
+
+    user.emailVerified = true;
+    user.verificationToken = undefined;
+    user.verificationTokenExpiry = undefined;
+    await user.save();
+
+    return res.json({
+      message: 'Email verified successfully',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        emailVerified: user.emailVerified
+      }
+    });
+  } catch (error) {
+    console.error('Email verification error:', error);
+    return res.status(500).json({ error: 'Unable to verify email' });
+  }
+});
+
+router.post('/request-otp-login', async (req, res) => {
+  try {
+    const identity = resolveIdentity(req.body);
+    if (!identity) {
+      return res.status(400).json({ error: 'Email or phone number is required' });
+    }
+
+    const user = await findUserByIdentity(identity);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found. Please sign up first.' });
+    }
+
+    if (user.otpLockedUntil && user.otpLockedUntil > new Date()) {
+      const seconds = Math.ceil((user.otpLockedUntil.getTime() - Date.now()) / 1000);
+      return res.status(429).json({ error: `Too many attempts. Please wait ${seconds} seconds.` });
+    }
+
+    if (user.lastOtpSentAt && Date.now() - user.lastOtpSentAt.getTime() < OTP_RESEND_INTERVAL_MS) {
+      const waitTime = Math.ceil((OTP_RESEND_INTERVAL_MS - (Date.now() - user.lastOtpSentAt.getTime())) / 1000);
+      res.setHeader('Retry-After', waitTime);
+      return res.status(429).json({ error: `OTP already sent. Please wait ${waitTime} seconds.` });
+    }
+
+    try {
+      await issueOtp(user, 'login', identity.channel);
+      return res.json({ message: `OTP sent to your ${identity.channel}. Enter it to login.` });
+    } catch (otpError) {
+      console.error('[AUTH] Failed to send OTP:', otpError.message);
+      return res.status(500).json({ error: 'Unable to send OTP. Please try again.' });
+    }
+  } catch (error) {
+    console.error('OTP request error:', error);
+    return res.status(500).json({ error: 'Unable to process OTP request' });
+  }
+});
+
+router.post('/verify-otp-login', verifyLimiter, async (req, res) => {
+  try {
+    const identity = resolveIdentity(req.body);
+    const { otp } = req.body;
+
+    if (!identity || !otp) {
+      return res.status(400).json({ error: 'Email/Phone and OTP are required' });
+    }
+
+    const user = await findUserByIdentity(identity);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    console.log('[OTP_VERIFY] Verifying OTP for:', identity.field, identity.value);
+    console.log('[OTP_VERIFY] OTP provided:', otp);
+    console.log('[OTP_VERIFY] OTP stored in DB:', user.otp ? '(hashed, present)' : '(not present)');
+    console.log('[OTP_VERIFY] OTP expiry:', user.otpExpiry);
+    console.log('[OTP_VERIFY] OTP attempts:', user.otpAttempts);
+
+    if (!user.otp || !user.otpExpiry) {
+      console.warn('[OTP_VERIFY] No OTP found for user');
+      return res.status(400).json({ error: 'No OTP request found. Please request a new OTP.' });
+    }
+
+    if (user.otpLockedUntil && user.otpLockedUntil > new Date()) {
+      const seconds = Math.ceil((user.otpLockedUntil.getTime() - Date.now()) / 1000);
+      console.warn('[OTP_VERIFY] Account locked. Wait time:', seconds);
+      return res.status(429).json({ error: `Too many attempts. Wait ${seconds} seconds.` });
+    }
+
+    const isExpired = user.otpExpiry.getTime() < Date.now();
+    const isMatch = await bcrypt.compare(otp, user.otp);
+
+    console.log('[OTP_VERIFY] OTP expired:', isExpired);
+    console.log('[OTP_VERIFY] OTP matches:', isMatch);
+
+    if (isExpired || !isMatch) {
+      user.otpAttempts += 1;
+      console.warn('[OTP_VERIFY] OTP failed. Attempt:', user.otpAttempts);
+      if (user.otpAttempts >= OTP_MAX_ATTEMPTS) {
+        user.otpLockedUntil = new Date(Date.now() + OTP_LOCK_DURATION_MS);
+        user.otpAttempts = 0;
+        console.warn('[OTP_VERIFY] Account locked due to too many attempts');
+      }
+      await user.save();
+      return res.status(400).json({ error: 'Invalid or expired OTP' });
+    }
+
+    // OTP is valid - clear all OTP data
+    console.log('[OTP_VERIFY] ✅ OTP verified successfully');
+    user.otp = undefined;
+    user.otpExpiry = undefined;
+    user.otpAttempts = 0;
+    user.otpLockedUntil = undefined;
+    
+    // Update login tracking
+    const clientIp = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || 'unknown';
+    
+    user.lastLogin = new Date();
+    user.lastIp = clientIp;
+    user.deviceInfo = userAgent;
+    user.loginCount = (user.loginCount || 0) + 1;
+    user.isActive = true;
+    await user.save();
+
+    const token = jwt.sign(
+      { id: user._id, email: user.email, phone: user.phone },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    console.log('[OTP_VERIFY] Token generated for user:', user._id);
+
+    return res.json({
+      message: 'OTP verified. Login successful.',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        addresses: user.addresses
+      }
+    });
+  } catch (error) {
+    console.error('[OTP_VERIFY] Error:', error);
+    return res.status(500).json({ error: 'Unable to verify OTP' });
+  }
+});
+
+router.post('/verify', verifyLimiter, async (req, res) => {
+  try {
+    const identity = resolveIdentity(req.body);
+    const { otp } = req.body;
+
+    if (!identity || !otp) {
+      return res
+        .status(400)
+        .json({ error: 'Phone number and OTP are both required' });
+    }
+
+    const user = await findUserByIdentity(identity);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ error: 'User not found. Please sign up first.' });
+    }
+
+    if (!user.otp || !user.otpExpiry) {
+      // If using client-side Firebase phone auth we may not have stored OTP locally.
+      // Phone verification must be completed via Firebase SDK on the client and
+      // then the client should POST the resulting ID token to `/auth/firebase-login`.
+      if (identity.channel === CONTACT_TYPES.PHONE) {
+        return res.status(400).json({ error: 'Phone verification is handled client-side via Firebase. Complete phone auth with Firebase SDK and POST the ID token to /auth/firebase-login.' });
+      }
+
+      return res.status(400).json({ error: 'No OTP request found. Please request a new OTP.' });
+    }
+
+    if (user.otpLockedUntil && user.otpLockedUntil > new Date()) {
+      const seconds = Math.ceil(
+        (user.otpLockedUntil.getTime() - Date.now()) / 1000
+      );
+      return res.status(429).json({
+        error: `Too many attempts. Please wait ${seconds} seconds before trying again.`,
+      });
+    }
+
+    // Phone verification is expected to be done client-side with Firebase.
+    if (identity.channel === CONTACT_TYPES.PHONE) {
+      return res.status(400).json({ error: 'Phone verification is handled client-side via Firebase. Please POST the ID token to /auth/firebase-login.' });
+    } else {
+      const isExpired = user.otpExpiry.getTime() < Date.now();
+      const isMatch = await bcrypt.compare(otp, user.otp);
+
+      if (isExpired || !isMatch) {
+        user.otpAttempts += 1;
+
+        if (user.otpAttempts >= OTP_MAX_ATTEMPTS) {
+          user.otpLockedUntil = new Date(Date.now() + OTP_LOCK_DURATION_MS);
+          user.otpAttempts = 0;
+        }
+
+        await user.save();
+
+        return res.status(400).json({ error: 'Invalid or expired OTP' });
+      }
+    }
+
+    // mark specific contact as verified
+    if (identity.field === 'email') {
+      user.emailVerified = true;
+    }
+    if (identity.field === 'phone') {
+      user.phoneVerified = true;
+    }
+
+    // overall verified if either contact verified
+    user.isVerified = Boolean(user.emailVerified || user.phoneVerified);
+
+    user.otp = undefined;
+    user.otpExpiry = undefined;
+    user.otpAttempts = 0;
+    user.otpLockedUntil = undefined;
+    await user.save();
+
+    const token = jwt.sign(
+      { id: user._id, email: user.email, phone: user.phone },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    return res.json({
+      message: 'OTP verified successfully',
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        isVerified: user.isVerified,
+        emailVerified: user.emailVerified,
+        phoneVerified: user.phoneVerified,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error('Verify OTP error:', error);
+    return res.status(500).json({ error: 'Unable to verify OTP' });
+  }
+});
+
+router.post('/resend', authLimiter, async (req, res) => {
+  try {
+    const identity = resolveIdentity(req.body);
+    if (!identity) {
+      return res.status(400).json({ error: 'Phone number or email is required' });
+    }
+
+    const user = await findUserByIdentity(identity);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ error: 'User not found. Please sign up first.' });
+    }
+
+    if (
+      user.lastOtpSentAt &&
+      Date.now() - user.lastOtpSentAt.getTime() < OTP_RESEND_INTERVAL_MS
+    ) {
+      const waitTime = Math.ceil(
+        (OTP_RESEND_INTERVAL_MS -
+          (Date.now() - user.lastOtpSentAt.getTime())) /
+          1000
+      );
+      res.setHeader('Retry-After', waitTime);
+      return res.status(429).json({
+        error: `OTP already sent. Please wait ${waitTime} seconds before requesting again.`,
+      });
+    }
+
+    try {
+      await issueOtp(user, 'verification', identity.channel);
+      return res.json({
+        message: 'We\'re sending a new OTP. Please check your messages.',
+      });
+    } catch (otpError) {
+      console.error('[AUTH] Failed to resend OTP:', otpError.message);
+      return res.status(500).json({ error: 'Unable to deliver OTP at the moment. Please confirm your number or try again later.' });
+    }
+  } catch (error) {
+    console.error('Resend OTP error:', error);
+    return res.status(500).json({ error: 'Unable to resend OTP' });
+  }
+});
+
+const { addToken, isBlacklisted } = require('../middleware/tokenBlacklist');
+
+// Return current user from token
+router.get('/me', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+    }
+
+    const token = auth.split(' ')[1];
+    let payload;
+    try {
+      payload = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // check blacklist
+    if (isBlacklisted(token)) return res.status(401).json({ error: 'Token revoked' });
+
+    const user = await User.findById(payload.id).select('-otp -passwordHash -__v');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    return res.json({ user });
+  } catch (err) {
+    console.error('GET /auth/me error:', err);
+    return res.status(500).json({ error: 'Unable to fetch user' });
+  }
+});
+
+// Firebase login endpoint
+router.post('/firebase-login', authLimiter, async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ error: 'Firebase ID token is required' });
+    }
+
+    // Verify Firebase ID token using the server-provided admin instance when available.
+    let decodedToken;
+    try {
+      const firebaseAdminInstance = (req.app && req.app.locals && req.app.locals.firebaseAdmin) || admin;
+      if (!firebaseAdminInstance || !firebaseAdminInstance.auth) {
+        console.error('Firebase Admin not configured on server');
+        return res.status(500).json({ error: 'Server does not have Firebase Admin configured' });
+      }
+      decodedToken = await firebaseAdminInstance.auth().verifyIdToken(idToken);
+    } catch (error) {
+      console.error('Firebase token verification error:', error && error.message ? error.message : error);
+      return res.status(401).json({ error: 'Invalid Firebase ID token' });
+    }
+
+    // Extract phone number from Firebase token
+    const phone = decodedToken.phone_number;
+    if (!phone) {
+      return res.status(400).json({ error: 'Phone number not found in Firebase token' });
+    }
+
+    // Normalize phone number
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone) {
+      return res.status(400).json({ error: 'Invalid phone number format' });
+    }
+
+    // Check if user exists
+    let user = await User.findOne({ phone: normalizedPhone });
+
+    if (!user) {
+      // Create new user if not exists
+      const clientIp = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
+      const userAgent = req.headers['user-agent'] || 'unknown';
+      
+      user = new User({
+        phone: normalizedPhone,
+        contactMethod: CONTACT_TYPES.PHONE,
+        phoneVerified: true,
+        isVerified: true,
+        createdAt: new Date(),
+        lastLogin: new Date(),
+        lastIp: clientIp,
+        deviceInfo: userAgent,
+        loginCount: 1,
+        isActive: true,
+        signupIp: clientIp,
+        signupDeviceInfo: userAgent
+      });
+      await user.save();
+      console.log('[AUTH] New user created via Firebase:', normalizedPhone);
+    } else {
+      // Update existing user to mark phone as verified
+      const clientIp = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
+      const userAgent = req.headers['user-agent'] || 'unknown';
+      
+      user.phoneVerified = true;
+      user.isVerified = Boolean(user.emailVerified || user.phoneVerified);
+      user.lastLogin = new Date();
+      user.lastIp = clientIp;
+      user.deviceInfo = userAgent;
+      user.loginCount = (user.loginCount || 0) + 1;
+      user.isActive = true;
+      await user.save();
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: user._id, email: user.email, phone: user.phone, username: user.username },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    return res.json({
+      message: 'Logged in successfully via Firebase',
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        isVerified: user.isVerified,
+        emailVerified: user.emailVerified,
+        phoneVerified: user.phoneVerified,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error('Firebase login error:', error);
+    return res.status(500).json({ error: 'Unable to process Firebase login' });
+  }
+});
+
+// NOTE: config endpoint consolidated below. Server exposes Firebase Admin
+// state via `app.locals.firebaseEnabled` and `app.locals.firebaseAdmin`.
+
+// Admin login with key verification
+router.post('/admin-login', authLimiter, async (req, res) => {
+  try {
+    const { email, password, adminKey } = req.body;
+    if (!email || !password || !adminKey) {
+      return res.status(400).json({ error: 'Email, password and admin key are required' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied. Admin privileges required.' });
+    }
+
+    const pwMatch = await bcrypt.compare(String(password), user.password);
+    if (!pwMatch) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    if (!user.adminKey || !(await bcrypt.compare(adminKey, user.adminKey))) {
+      return res.status(401).json({ error: 'Invalid admin key' });
+    }
+
+    const token = jwt.sign(
+      { id: user._id, email: user.email, phone: user.phone, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    return res.json({
+      message: 'Admin login successful',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        addresses: user.addresses
+      }
+    });
+  } catch (error) {
+    console.error('Admin login error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Logout endpoint - blacklist token
+router.post('/logout', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      return res.status(400).json({ error: 'Missing Authorization header' });
+    }
+    const token = auth.split(' ')[1];
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      // compute expiry from payload / default to 1 hour
+      const expMs = payload.exp ? payload.exp * 1000 : Date.now() + 60 * 60 * 1000;
+      addToken(token, expMs);
+      return res.json({ message: 'Logged out' });
+    } catch (err) {
+      // still blacklist the token string for safety
+      addToken(token, Date.now() + 60 * 60 * 1000);
+      return res.json({ message: 'Logged out' });
+    }
+  } catch (err) {
+    console.error('Logout error:', err);
+    return res.status(500).json({ error: 'Unable to logout' });
+  }
+});
+
+// GET logout for convenience (e.g., if user navigates to /api/auth/logout)
+router.get('/logout', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      return res.status(200).json({ message: 'Logged out' }); // no token, just return ok
+    }
+    const token = auth.split(' ')[1];
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      const expMs = payload.exp ? payload.exp * 1000 : Date.now() + 60 * 60 * 1000;
+      addToken(token, expMs);
+      return res.json({ message: 'Logged out' });
+    } catch (err) {
+      addToken(token, Date.now() + 60 * 60 * 1000);
+      return res.json({ message: 'Logged out' });
+    }
+  } catch (err) {
+    console.error('Logout error:', err);
+    return res.status(500).json({ error: 'Unable to logout' });
+  }
+});
+
+// Simple config endpoint the frontend can poll to decide UI behavior
+router.get('/config', async (req, res) => {
+  try {
+    const firebaseEnabled = Boolean(req.app && req.app.locals && req.app.locals.firebaseEnabled);
+    // Email OTP available when SMTP is configured (mailTransport not jsonTransport)
+    const emailOtpEnabled = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+    return res.json({ firebaseEnabled, emailOtpEnabled });
+  } catch (err) {
+    console.error('GET /auth/config error:', err);
+    return res.status(500).json({ error: 'Unable to fetch auth config' });
+  }
+});
+
+module.exports = router;
+
