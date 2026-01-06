@@ -14,7 +14,7 @@ const { sendOtpViaSms } = require('../utils/fast2sms');
 
 
 const router = express.Router();
-const { authLimiter, otpRequestLimiter, verifyLimiter } = require('../middleware/rateLimiter');
+const { authLimiter, verifyLimiter } = require('../middleware/rateLimiter');
 
 const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES || '10', 10);
 const OTP_MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS || '5', 10);
@@ -182,6 +182,7 @@ async function sendOtpEmail(email, otp, context) {
   console.log('[OTP_EMAIL] Attempting to send OTP email...');
   console.log('[OTP_EMAIL] To:', email);
   console.log('[OTP_EMAIL] Context:', context);
+  console.log('[OTP_EMAIL] ***** OTP CODE:', otp, '*****'); // Log OTP for development/testing
   console.log('[OTP_EMAIL] SMTP Config:', {
     host: process.env.SMTP_HOST,
     port: process.env.SMTP_PORT,
@@ -258,6 +259,7 @@ async function sendOtpSms(phone, otp, context) {
 
   try {
     console.log('[SMS] Sending OTP via Fast2SMS to:', phone);
+    console.log('[SMS] ***** OTP CODE:', otp, '*****'); // Log OTP for development/testing
     const result = await sendOtpViaSms(phone, otp, context);
     console.log('[SMS] ✅ OTP sent successfully via Fast2SMS');
     return result;
@@ -601,7 +603,7 @@ router.post('/verify-email', async (req, res) => {
   }
 });
 
-router.post('/request-otp-login', otpRequestLimiter, async (req, res) => {
+router.post('/request-otp-login', async (req, res) => {
   try {
     const identity = resolveIdentity(req.body);
     if (!identity) {
