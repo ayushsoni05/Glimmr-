@@ -38,14 +38,19 @@ const OTPLogin = () => {
         ? { phone: contact }
         : { email: contact };
       
-      await api.post('/auth/request-otp-login', payload);
+      console.log('[OTPLogin] Requesting OTP:', { contactType, payload });
+      const response = await api.post('/auth/request-otp-login', payload);
+      console.log('[OTPLogin] OTP request successful:', response.data);
       
       setIsPhoneOTP(contactType === 'phone');
       setStep('otp');
       setCountdown(60);
       success(`OTP sent to your ${contactType}`);
     } catch (err) {
-      const errorMsg = err.response?.data?.error || 'Failed to send OTP';
+      console.error('[OTPLogin] OTP request failed:', err);
+      console.error('[OTPLogin] Error response:', err.response?.data);
+      console.error('[OTPLogin] Error status:', err.response?.status);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to send OTP';
       setError(errorMsg);
       showError(errorMsg);
     } finally {
