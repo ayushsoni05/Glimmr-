@@ -13,15 +13,37 @@ The `FAST2SMS_API_KEY` environment variable is **NOT configured** on your Render
 2. Find your backend service: `glimmr-jewellry-e-commerce-platform-5`
 3. Click on it to open
 
-### Step 2: Add Environment Variable
+### Step 2: Add Environment Variables (CRITICAL)
 1. Click on **"Environment"** tab in the left sidebar
 2. Click **"Add Environment Variable"** button
-3. Add this variable:
-   - **Key:** `FAST2SMS_API_KEY`
-   - **Value:** `MX917LlNbrVUytu36KSeTcZdOD4205WkIvqRJmYazFogPhfHxs`
-4. Click **"Save Changes"**
+3. Add these variables ONE BY ONE:
 
-### Step 3: Add Other Missing Variables
+#### For Phone OTP (SMS):
+- **Key:** `FAST2SMS_API_KEY`
+- **Value:** `MX917LlNbrVUytu36KSeTcZdOD4205WkIvqRJmYazFogPhfHxs`
+
+#### For Email OTP (REQUIRED - Currently Missing):
+- **Key:** `SMTP_HOST`
+- **Value:** `smtp.gmail.com`
+
+- **Key:** `SMTP_PORT`
+- **Value:** `587`
+
+- **Key:** `SMTP_SECURE`
+- **Value:** `false`
+
+- **Key:** `SMTP_USER`
+- **Value:** `glimmr05@gmail.com`
+
+- **Key:** `SMTP_PASS`
+- **Value:** `zyhuhhauvafowdyr`
+
+- **Key:** `MAIL_FROM`
+- **Value:** `glimmr05@gmail.com`
+
+4. Click **"Save Changes"** after adding each one
+
+### Step 3: Add Other Required Variables
 While you're there, make sure these are also configured:
 
 ```
