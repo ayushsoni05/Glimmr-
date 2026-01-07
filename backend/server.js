@@ -5,6 +5,7 @@ const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
 const { MongoMemoryServer } = require('mongodb-memory-server');
+const nodemailer = require('nodemailer');
 const { startKeepAlive } = require('./utils/keepAlive');
 
 // Load environment variables before loading any route modules that rely on them (SMTP, etc.)
@@ -47,6 +48,33 @@ app.use((req, res, next) => {
 // Serve uploaded product images
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// SMTP health check endpoint to help diagnose OTP send failures
+app.get('/api/health/smtp', async (req, res) => {
+  const required = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS'];
+  const missing = required.filter((v) => !process.env[v]);
+  if (missing.length) {
+    return res.status(500).json({ ok: false, error: 'Missing SMTP env vars', missing });
+  }
+
+  const transport = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+    connectionTimeout: 15000,
+  });
+
+  try {
+    await transport.verify();
+    return res.json({ ok: true, host: process.env.SMTP_HOST, secure: process.env.SMTP_SECURE === 'true' });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // Ensure upload directories exist
 const uploadDirs = ['uploads/products', 'uploads/profiles'];
@@ -435,4 +463,3 @@ process.on('uncaughtException', (err) => {
 });
 
 startServer(PORT);
-
