@@ -8,7 +8,7 @@ console.debug('[api] baseURL =', API_BASE_URL);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000, // Increased to 30 seconds for order processing with live rates
+  timeout: 90000, // 90 seconds for Render cold starts + SMTP sending
 });
 
 // Add request interceptor to automatically include auth token
@@ -52,4 +52,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-
