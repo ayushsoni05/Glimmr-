@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 // Twilio removed: prefer Firebase client-side phone auth
 const crypto = require('crypto');
 const admin = require('firebase-admin');
@@ -31,6 +32,7 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 // We still `require('firebase-admin')` here to access the module if it
 // was initialized by the server process, but we do not initialize it here.
 
+const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const mailTransport = createMailTransport();
 // Server-side SMS provider removed in favor of Firebase client-side phone auth
 
@@ -189,18 +191,14 @@ const buildOtpExpiry = () =>
   new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
 async function sendOtpEmail(email, otp, context) {
-  console.log('[OTP_EMAIL] Attempting to send OTP email...');
+  console.log('[OTP_EMAIL] Attempting to send OTP email via Resend...');
   console.log('[OTP_EMAIL] To:', email);
   console.log('[OTP_EMAIL] Context:', context);
   console.log('[OTP_EMAIL] ***** OTP CODE:', otp, '*****'); // Log OTP for development/testing
-  console.log('[OTP_EMAIL] SMTP Config:', {
-    host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT,
-    user: process.env.SMTP_USER,
-    from: process.env.MAIL_FROM || process.env.SMTP_USER
-  });
 
   const subject = `Your ${context} OTP - Glimmr`;
+  const from = process.env.RESEND_FROM || process.env.MAIL_FROM || 'onboarding@resend.dev';
+
   const html = `
     <!DOCTYPE html>
     <html>
@@ -235,28 +233,23 @@ async function sendOtpEmail(email, otp, context) {
     </html>
   `;
 
-  const message = {
-    from: `"Glimmr Jewelry" <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
-    to: email,
-    subject,
-    text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
-    html,
-  };
+  if (!resendClient) {
+    console.error('[OTP_EMAIL] Resend client not configured. Set RESEND_API_KEY.');
+    throw new Error('Email service unavailable');
+  }
 
   try {
-    const result = await mailTransport.sendMail(message);
-    console.log('[OTP_EMAIL] ✅ Email sent successfully');
-    console.log('[OTP_EMAIL] Message ID:', result && result.messageId);
-    console.log('[OTP_EMAIL] Response:', result && result.response);
-    console.log('[OTP_EMAIL] Accepted:', result && result.accepted);
-    console.log('[OTP_EMAIL] Rejected:', result && result.rejected);
-    if (result && result.rejected && result.rejected.length) {
-      console.warn('[OTP_EMAIL] Warning: Some recipients were rejected by SMTP');
-    }
+    const result = await resendClient.emails.send({
+      from,
+      to: email,
+      subject,
+      html,
+      text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
+    });
+    console.log('[OTP_EMAIL] ✅ Email sent via Resend:', result && result.id ? result.id : 'no-id');
     return result;
   } catch (error) {
-    console.error('[OTP_EMAIL] ❌ Failed to send email:', error.message);
-    console.error('[OTP_EMAIL] Error details:', error);
+    console.error('[OTP_EMAIL] ❌ Resend send failed:', error && error.message ? error.message : error);
     throw error;
   }
 }
