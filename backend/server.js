@@ -5,6 +5,7 @@ const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
 const { MongoMemoryServer } = require('mongodb-memory-server');
+const { startKeepAlive } = require('./utils/keepAlive');
 
 // Load environment variables before loading any route modules that rely on them (SMTP, etc.)
 dotenv.config();
@@ -22,8 +23,22 @@ const app = express();
 console.log('Starting Glimmr backend...');
 const PORT = process.env.PORT || process.env.BACKEND_PORT || 5002;
 
+// CORS configuration for production (Vercel frontend + Render backend)
+const corsOptions = {
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://glimmr-jewellry-e-commerce-platform.vercel.app',
+    /\.vercel\.app$/,  // Allow all Vercel preview deployments
+    /\.netlify\.app$/  // Allow Netlify deployments if used
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
@@ -214,16 +229,128 @@ app.get('/', (req, res) => {
     message: 'Glimmr API Server', 
     status: 'running',
     version: '1.0.0',
+    baseUrl: 'https://glimmr-jewellry-e-commerce-platform-5.onrender.com/api',
+    documentation: 'See /api/docs or API_ENDPOINTS_DOCUMENTATION.md',
     endpoints: {
-      health: '/api/health',
-      auth: '/api/auth',
-      products: '/api/products',
-      cart: '/api/cart',
-      orders: '/api/orders',
-      user: '/api/user',
-      admin: '/api/admin',
-      recommend: '/api/recommend',
-      prices: '/api/prices'
+      health: {
+        url: '/api/health',
+        method: 'GET',
+        description: 'Health check endpoint'
+      },
+      auth: {
+        url: '/api/auth',
+        methods: ['POST'],
+        endpoints: [
+          'POST /auth/signup - Register new user',
+          'POST /auth/login - Email/password login',
+          'POST /auth/request-otp-login - Request OTP',
+          'POST /auth/verify-otp-login - Verify OTP',
+          'POST /auth/logout - Logout user',
+          'POST /auth/verify-email - Verify email',
+          'POST /auth/admin-login - Admin login'
+        ]
+      },
+      user: {
+        url: '/api/user',
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        endpoints: [
+          'GET /user/profile - Get user profile',
+          'PUT /user/profile - Update profile',
+          'GET /user/addresses - Get addresses',
+          'POST /user/addresses - Add address',
+          'PUT /user/addresses/:id - Update address',
+          'DELETE /user/addresses/:id - Delete address',
+          'GET /user/wishlist - Get wishlist',
+          'POST /user/wishlist - Add to wishlist',
+          'DELETE /user/wishlist/:id - Remove from wishlist'
+        ]
+      },
+      products: {
+        url: '/api/products',
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        endpoints: [
+          'GET /products - List all products',
+          'GET /products?category=Gold - Filter by category',
+          'GET /products/:id - Get product details',
+          'POST /products - Create product (admin)',
+          'PUT /products/:id - Update product (admin)',
+          'DELETE /products/:id - Delete product (admin)'
+        ]
+      },
+      cart: {
+        url: '/api/cart',
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        endpoints: [
+          'GET /cart/:cartId - Get cart',
+          'POST /cart/:cartId/add - Add item',
+          'PUT /cart/:cartId/update - Update item',
+          'DELETE /cart/:cartId/remove - Remove item',
+          'DELETE /cart/:cartId/clear - Clear cart'
+        ]
+      },
+      orders: {
+        url: '/api/orders',
+        methods: ['GET', 'POST', 'PUT'],
+        endpoints: [
+          'GET /orders - List orders',
+          'POST /orders - Create order',
+          'GET /orders/:id - Get order',
+          'PUT /orders/:id - Update order',
+          'POST /orders/:id/cancel - Cancel order'
+        ]
+      },
+      prices: {
+        url: '/api/prices',
+        methods: ['GET'],
+        endpoints: [
+          'GET /prices/gold-price - Current gold price',
+          'GET /prices/diamond-pricing - Diamond pricing',
+          'GET /prices/silver-price - Silver price'
+        ]
+      },
+      recommend: {
+        url: '/api/recommend',
+        methods: ['GET'],
+        endpoints: [
+          'GET /recommend - Get recommendations',
+          'GET /recommend/similar/:id - Similar products',
+          'GET /recommend/trending - Trending products'
+        ]
+      },
+      admin: {
+        url: '/api/admin',
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        endpoints: [
+          'GET /admin/users - List users',
+          'GET /admin/dashboard - Dashboard stats',
+          'GET /admin/orders - All orders',
+          'GET /admin/products - All products'
+        ],
+        auth: 'Requires admin token'
+      }
+    },
+    features: {
+      authentication: ['Email/Password', 'OTP Login', 'Firebase', 'Admin'],
+      otp: {
+        email: 'Gmail SMTP',
+        phone: 'Fast2SMS',
+        expiry: '10 minutes',
+        maxAttempts: 5
+      },
+      database: 'MongoDB',
+      storage: 'Local + Cloud',
+      realTimeUpdates: 'Prices updated hourly',
+      keepAlive: {
+        enabled: process.env.NODE_ENV === 'production',
+        interval: '14 minutes',
+        purpose: 'Prevent Render free tier spindown'
+      }
+    },
+    deployed: {
+      frontend: 'https://glimmr-jewellry-e-commerce-platform.vercel.app',
+      backend: 'https://glimmr-jewellry-e-commerce-platform-5.onrender.com',
+      database: 'MongoDB Atlas',
+      status: '✅ All systems operational'
     }
   });
 });
@@ -266,6 +393,15 @@ async function startServer(preferredPort) {
         server.on('listening', () => {
           app.locals.server = server;
           console.log(`Server running on port ${port}`);
+          
+          // Start keep-alive service to prevent Render free tier from spinning down
+          if (process.env.NODE_ENV === 'production') {
+            console.log('[SERVER] Starting keep-alive service for production...');
+            startKeepAlive();
+          } else {
+            console.log('[SERVER] Keep-alive service disabled in development');
+          }
+          
           resolve();
         });
 
@@ -299,3 +435,4 @@ process.on('uncaughtException', (err) => {
 });
 
 startServer(PORT);
+
