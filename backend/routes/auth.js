@@ -47,29 +47,39 @@ function auditSmsEvent(event) {
 }
 
 function createMailTransport() {
-  if (
-    process.env.SMTP_HOST &&
-    process.env.SMTP_PORT &&
-    process.env.SMTP_USER &&
-    process.env.SMTP_PASS
-  ) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+  // Support both existing names and new Gmail app password names
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = Number(process.env.SMTP_PORT || 587);
+  const secure = process.env.SMTP_SECURE === 'true' ? true : false; // Render + Gmail uses STARTTLS on 587
+  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL;
+  const pass = process.env.SMTP_PASS || process.env.SMTP_APP_PASSWORD;
+
+  if (user && pass) {
+    const transport = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
     });
+
+    // Log verification result at startup to surface SMTP connectivity issues
+    transport.verify((err) => {
+      if (err) {
+        console.error('[SMTP] Transport verify failed:', err && err.message ? err.message : err);
+      } else {
+        console.log('[SMTP] Transport verified:', { host, port, secure });
+      }
+    });
+
+    return transport;
   }
 
   console.warn(
-    'SMTP credentials not configured. Falling back to console email logger. Configure SMTP_* env vars for production.'
+    'SMTP credentials not configured. Falling back to console email logger. Configure SMTP_* or SMTP_EMAIL/SMTP_APP_PASSWORD env vars for production.'
   );
-  return nodemailer.createTransport({
-    jsonTransport: true,
-  });
+  return nodemailer.createTransport({ jsonTransport: true });
 }
 
 // NOTE: Twilio has been removed. For phone verification, use Firebase client-side
@@ -277,6 +287,14 @@ async function issueOtp(user, context, channel = CONTACT_TYPES.EMAIL) {
   console.log('[OTP] Context:', context);
   console.log('[OTP] Channel:', channel);
 
+  // Validate user has the required contact method
+  if (channel === CONTACT_TYPES.EMAIL && !user.email) {
+    throw new Error('User does not have an email address. Please use phone OTP.');
+  }
+  if (channel === CONTACT_TYPES.PHONE && !user.phone) {
+    throw new Error('User does not have a phone number. Please use email OTP.');
+  }
+
   user.otp = hashedOtp;
   user.otpExpiry = buildOtpExpiry();
   user.otpAttempts = 0;
@@ -305,12 +323,17 @@ async function issueOtp(user, context, channel = CONTACT_TYPES.EMAIL) {
       console.log('[OTP] Email sent successfully to:', user.email);
     } catch (emailError) {
       console.error('[OTP] Failed to send email:', emailError.message);
+      console.error('[OTP] Email error details:', emailError);
       // Revert OTP save if email fails
       user.otp = undefined;
       user.otpExpiry = undefined;
       user.lastOtpSentAt = undefined;
       await user.save();
-      throw new Error('Failed to send OTP email. Please try again.');
+      // Provide more specific error message
+      if (emailError.message && emailError.message.includes('SMTP')) {
+        throw new Error('Email service error. Please try phone OTP or contact support.');
+      }
+      throw new Error(`Failed to send OTP email: ${emailError.message || 'Please try again'}`);
     }
   } else {
     // Shouldn't reach here; defensive check
@@ -631,7 +654,10 @@ router.post('/request-otp-login', async (req, res) => {
       return res.json({ message: `OTP sent to your ${identity.channel}. Enter it to login.` });
     } catch (otpError) {
       console.error('[AUTH] Failed to send OTP:', otpError.message);
-      return res.status(500).json({ error: 'Unable to send OTP. Please try again.' });
+      console.error('[AUTH] OTP Error stack:', otpError.stack);
+      // Return more specific error message
+      const errorMsg = otpError.message || 'Unable to send OTP. Please try again.';
+      return res.status(500).json({ error: errorMsg });
     }
   } catch (error) {
     console.error('OTP request error:', error);
