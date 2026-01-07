@@ -39,18 +39,54 @@ const OTPLogin = () => {
         : { email: contact };
       
       console.log('[OTPLogin] Requesting OTP:', { contactType, payload });
-      const response = await api.post('/auth/request-otp-login', payload);
-      console.log('[OTPLogin] OTP request successful:', response.data);
       
-      setIsPhoneOTP(contactType === 'phone');
-      setStep('otp');
-      setCountdown(60);
-      success(`OTP sent to your ${contactType}`);
+      // Try to wake up backend first (Render free tier spins down after inactivity)
+      try {
+        console.log('[OTPLogin] Waking up backend...');
+        await api.get('/health', { timeout: 10000 });
+        console.log('[OTPLogin] Backend is awake');
+      } catch (healthErr) {
+        console.warn('[OTPLogin] Health check failed, proceeding anyway:', healthErr.message);
+      }
+      
+      // Send OTP request with retry logic
+      let lastError;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          console.log(`[OTPLogin] Attempt ${attempt} to send OTP`);
+          const response = await api.post('/auth/request-otp-login', payload);
+          console.log('[OTPLogin] OTP request successful:', response.data);
+          
+          setIsPhoneOTP(contactType === 'phone');
+          setStep('otp');
+          setCountdown(60);
+          success(`OTP sent to your ${contactType}`);
+          return; // Success, exit function
+        } catch (attemptErr) {
+          lastError = attemptErr;
+          if (attemptErr.code === 'ECONNABORTED' && attempt < 2) {
+            console.log('[OTPLogin] Timeout, retrying...');
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+            continue;
+          }
+          throw attemptErr; // If not timeout or last attempt, throw error
+        }
+      }
+      throw lastError; // If all retries failed
     } catch (err) {
       console.error('[OTPLogin] OTP request failed:', err);
       console.error('[OTPLogin] Error response:', err.response?.data);
       console.error('[OTPLogin] Error status:', err.response?.status);
-      const errorMsg = err.response?.data?.error || err.message || 'Failed to send OTP';
+      
+      let errorMsg;
+      if (err.code === 'ECONNABORTED') {
+        errorMsg = 'Server is taking too long to respond. Please wait a moment and try again.';
+      } else if (err.message === 'Network Error') {
+        errorMsg = 'Cannot connect to server. Please check your internet connection.';
+      } else {
+        errorMsg = err.response?.data?.error || err.message || 'Failed to send OTP';
+      }
+      
       setError(errorMsg);
       showError(errorMsg);
     } finally {
@@ -167,8 +203,22 @@ const OTPLogin = () => {
               disabled={loading}
               className="w-full bg-gradient-to-r from-gold-500 to-gold-600 hover:from-gold-600 hover:to-gold-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
             >
-              {loading ? 'Sending OTP...' : 'Send OTP'}
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Waking up server & sending OTP...
+                </span>
+              ) : 'Send OTP'}
             </button>
+            
+            {loading && (
+              <p className="text-xs text-gray-400 text-center mt-2">
+                ⏳ First request may take 30-60 seconds as server wakes up
+              </p>
+            )}
           </form>
         ) : (
           <form onSubmit={handleVerifyOTP} className="space-y-4">
