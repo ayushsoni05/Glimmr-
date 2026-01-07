@@ -5,6 +5,7 @@ const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
 const { MongoMemoryServer } = require('mongodb-memory-server');
+const { startKeepAlive } = require('./utils/keepAlive');
 
 // Load environment variables before loading any route modules that rely on them (SMTP, etc.)
 dotenv.config();
@@ -280,6 +281,15 @@ async function startServer(preferredPort) {
         server.on('listening', () => {
           app.locals.server = server;
           console.log(`Server running on port ${port}`);
+          
+          // Start keep-alive service to prevent Render free tier from spinning down
+          if (process.env.NODE_ENV === 'production') {
+            console.log('[SERVER] Starting keep-alive service for production...');
+            startKeepAlive();
+          } else {
+            console.log('[SERVER] Keep-alive service disabled in development');
+          }
+          
           resolve();
         });
 
