@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
+const { Resend } = require('resend');
 
 // Initialize Resend client (preferred)
 const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -41,14 +42,19 @@ function createMailTransport() {
 // Initialize mail transport
 mailTransport = createMailTransport();
 
-// Helper function to send emails via Resend or fallback to SMTP
-async function sendEmail({ to, subject, html }) {
-  const from = process.env.RESEND_FROM || 'onboarding@resend.dev';
-  
+// Initialize Resend client if configured
+const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const FROM_EMAIL = process.env.RESEND_FROM || process.env.MAIL_FROM || process.env.SMTP_USER || 'noreply@glimmr.com';
+
+async function sendEmail({ to, subject, html, text }) {
   if (resendClient) {
-    // Prefer Resend
     try {
-      const result = await resendClient.emails.send({ from, to, subject, html });
+      const result = await resendClient.emails.send({
+        from: FROM_EMAIL,
+        to,
+        subject,
+        html,
+      });
       console.log('[EMAIL] Sent via Resend:', result?.id || 'success');
       return result;
     } catch (error) {
@@ -56,13 +62,13 @@ async function sendEmail({ to, subject, html }) {
       throw error;
     }
   } else {
-    // Fallback to SMTP
     try {
       const result = await mailTransport.sendMail({
-        from: `Glimmr <${from}>`,
+        from: `Glimmr <${FROM_EMAIL}>`,
         to,
         subject,
-        html
+        html,
+        text,
       });
       console.log('[EMAIL] Sent via SMTP:', result?.messageId || 'success');
       return result;
@@ -72,6 +78,8 @@ async function sendEmail({ to, subject, html }) {
     }
   }
 }
+
+ 
 
 /**
  * Send admin notification email when a new user signs up
