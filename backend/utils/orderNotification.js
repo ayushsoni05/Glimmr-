@@ -1,6 +1,10 @@
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const Order = require('../models/Order');
 const User = require('../models/User');
+
+// Initialize Resend client
+const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 function createMailTransport() {
   if (
@@ -26,6 +30,37 @@ function createMailTransport() {
 }
 
 const mailTransport = createMailTransport();
+
+// Helper function to send email via Resend or fallback to SMTP
+async function sendEmail({ to, subject, html }) {
+  const from = process.env.RESEND_FROM || process.env.MAIL_FROM || 'onboarding@resend.dev';
+  
+  if (resendClient) {
+    try {
+      const result = await resendClient.emails.send({ from, to, subject, html });
+      console.log('[EMAIL] Sent via Resend:', result?.id || 'success');
+      return result;
+    } catch (error) {
+      console.error('[EMAIL] Resend failed:', error.message);
+      throw error;
+    }
+  } else {
+    // Fallback to SMTP
+    try {
+      const result = await mailTransport.sendMail({
+        from: `Glimmr <${from}>`,
+        to,
+        subject,
+        html
+      });
+      console.log('[EMAIL] Sent via SMTP:', result?.messageId || 'success');
+      return result;
+    } catch (error) {
+      console.error('[EMAIL] SMTP failed:', error.message);
+      throw error;
+    }
+  }
+}
 
 async function sendOrderConfirmationEmail(order, user) {
   try {
@@ -304,8 +339,7 @@ async function sendOrderConfirmationEmail(order, user) {
     </html>
   `;
 
-    await mailTransport.sendMail({
-      from: `Glimmr <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
+    await sendEmail({
       to: user.email,
       subject: `✨ Order Confirmed #${order._id} - Thank You for Choosing Glimmr!`,
       html
@@ -477,8 +511,7 @@ async function sendOrderShippedEmail(order, user) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: `Glimmr <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
+    await sendEmail({
       to: user.email,
       subject: `🚚 Order Shipped #${order._id}`,
       html
@@ -613,8 +646,7 @@ async function sendOrderDeliveredEmail(order, user) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: `Glimmr <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
+    await sendEmail({
       to: user.email,
       subject: `🎉 Order Delivered #${order._id}`,
       html
@@ -724,8 +756,7 @@ async function sendGenericStatusUpdateEmail(order, user, status) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: `Glimmr <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
+    await sendEmail({
       to: user.email,
       subject: `${config.emoji} Order Update: ${config.title} - #${order._id}`,
       html

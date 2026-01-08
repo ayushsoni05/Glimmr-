@@ -1,4 +1,9 @@
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
+
+// Initialize Resend client (preferred)
+const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+console.log('[MAIL] Resend client initialized:', !!resendClient);
 
 let mailTransport = null;
 
@@ -35,6 +40,38 @@ function createMailTransport() {
 
 // Initialize mail transport
 mailTransport = createMailTransport();
+
+// Helper function to send emails via Resend or fallback to SMTP
+async function sendEmail({ to, subject, html }) {
+  const from = process.env.RESEND_FROM || 'onboarding@resend.dev';
+  
+  if (resendClient) {
+    // Prefer Resend
+    try {
+      const result = await resendClient.emails.send({ from, to, subject, html });
+      console.log('[EMAIL] Sent via Resend:', result?.id || 'success');
+      return result;
+    } catch (error) {
+      console.error('[EMAIL] Resend failed:', error.message);
+      throw error;
+    }
+  } else {
+    // Fallback to SMTP
+    try {
+      const result = await mailTransport.sendMail({
+        from: `Glimmr <${from}>`,
+        to,
+        subject,
+        html
+      });
+      console.log('[EMAIL] Sent via SMTP:', result?.messageId || 'success');
+      return result;
+    } catch (error) {
+      console.error('[EMAIL] SMTP failed:', error.message);
+      throw error;
+    }
+  }
+}
 
 /**
  * Send admin notification email when a new user signs up
@@ -132,12 +169,10 @@ Email Verified: ${user.emailVerified ? 'Yes' : 'Pending'}
 This is an automated notification from Glimmr Admin Panel.
     `;
 
-    await mailTransport.sendMail({
-      from: process.env.SMTP_USER || 'noreply@glimmr.com',
+    await sendEmail({
       to: ADMIN_EMAIL,
       subject: `🎉 New User Registration: ${user.name || user.email}`,
-      html: htmlContent,
-      text: textContent,
+      html: htmlContent
     });
 
     console.log(`Admin notification sent for user: ${user.email}`);
@@ -197,11 +232,10 @@ async function sendSuspiciousActivityAlert(alertDetails) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: process.env.SMTP_USER || 'noreply@glimmr.com',
+    await sendEmail({
       to: ADMIN_EMAIL,
       subject: `⚠️ Suspicious Activity: ${alertDetails.type || 'Alert'}`,
-      html: htmlContent,
+      html: htmlContent
     });
 
     console.log('Suspicious activity alert sent to admin');
@@ -291,11 +325,10 @@ async function sendLoginNotificationToAdmin(user, loginDetails = {}) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: process.env.SMTP_USER || 'noreply@glimmr.com',
+    await sendEmail({
       to: ADMIN_EMAIL,
       subject: `🔐 User Login: ${user.name || user.email}`,
-      html: htmlContent,
+      html: htmlContent
     });
 
     console.log(`Admin login notification sent for user: ${user.email}`);
@@ -501,19 +534,15 @@ async function sendOrderNotificationToAdmin(order, user) {
     `;
 
     console.log('[ADMIN_NOTIF] Attempting to send email...');
-    console.log('[ADMIN_NOTIF] From:', process.env.MAIL_FROM || process.env.SMTP_USER);
     console.log('[ADMIN_NOTIF] To:', ADMIN_EMAIL);
     
-    const result = await mailTransport.sendMail({
-      from: `"Glimmr Orders" <${process.env.MAIL_FROM || process.env.SMTP_USER || 'noreply@glimmr.com'}>`,
+    await sendEmail({
       to: ADMIN_EMAIL,
       subject: `🛒 New Order #${order._id.toString().slice(-6)} - ₹${order.totalAmount.toLocaleString('en-IN')}`,
-      html: htmlContent,
+      html: htmlContent
     });
 
     console.log('[ADMIN_NOTIF] ✅ Email sent successfully');
-    console.log('[ADMIN_NOTIF] Message ID:', result.messageId);
-    console.log('[ADMIN_NOTIF] Response:', result.response);
     return true;
   } catch (error) {
     console.error('[ADMIN_NOTIF] ❌ Error sending admin order notification:', error.message || error);
