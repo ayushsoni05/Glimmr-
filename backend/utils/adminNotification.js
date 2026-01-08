@@ -39,9 +39,18 @@ mailTransport = createMailTransport();
 
 // Initialize Resend client if configured
 const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const FROM_EMAIL = process.env.RESEND_FROM || process.env.MAIL_FROM || process.env.SMTP_USER || 'noreply@glimmr.com';
+const FROM_EMAIL = process.env.RESEND_FROM || 'onboarding@resend.dev';
+
+console.log('[MAIL] Resend client initialized:', !!resendClient);
+console.log('[MAIL] FROM_EMAIL configured:', FROM_EMAIL);
 
 async function sendEmail({ to, subject, html, text }) {
+  console.log('[EMAIL] Attempting to send email...');
+  console.log('[EMAIL] To:', to);
+  console.log('[EMAIL] From:', FROM_EMAIL);
+  console.log('[EMAIL] Subject:', subject);
+  console.log('[EMAIL] Using Resend:', !!resendClient);
+  
   if (resendClient) {
     try {
       const result = await resendClient.emails.send({
@@ -50,10 +59,12 @@ async function sendEmail({ to, subject, html, text }) {
         subject,
         html,
       });
-      console.log('[EMAIL] Sent via Resend:', result?.id || 'success');
+      console.log('[EMAIL] ✅ Sent via Resend successfully!');
+      console.log('[EMAIL] Resend ID:', result?.id);
       return result;
     } catch (error) {
-      console.error('[EMAIL] Resend failed:', error.message);
+      console.error('[EMAIL] ❌ Resend failed:', error.message);
+      console.error('[EMAIL] Full error:', JSON.stringify(error, null, 2));
       throw error;
     }
   } else {
