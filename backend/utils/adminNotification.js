@@ -1,10 +1,5 @@
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
-const { Resend } = require('resend');
-
-// Initialize Resend client (preferred)
-const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-console.log('[MAIL] Resend client initialized:', !!resendClient);
 
 let mailTransport = null;
 
