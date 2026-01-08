@@ -375,8 +375,8 @@ async function sendOrderNotificationToAdmin(order, user) {
       timeStyle: 'short'
     });
 
-    // Image base URL (admin wants product thumbnails)
-    const imageBase = (process.env.IMAGE_BASE_URL || process.env.BACKEND_URL || 'http://127.0.0.1:5002').replace(/\/$/, '');
+    // Image base URL (force https to avoid mixed-content blocking in emails)
+    const imageBase = (process.env.IMAGE_BASE_URL || process.env.BACKEND_URL || 'https://glimmr-jewellry-e-commerce-platform-5.onrender.com').replace(/\/$/, '');
 
     // Build item rows with images and line totals
     const itemsList = order.items.map(item => {
