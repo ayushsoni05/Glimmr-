@@ -485,7 +485,7 @@ router.post('/login', authLimiter, async (req, res) => {
     }
     // Both email and phone are accepted as identity fields. Phone verification
     // is expected to be performed client-side via Firebase when configured.
-    const { password, adminKey } = req.body;
+    const { password, adminKey, twoFACode } = req.body;
     const user = await findUserByIdentity(identity);
     if (!user) {
       return res.status(404).json({ error: 'User not found. Please sign up first.' });
@@ -502,13 +502,106 @@ router.post('/login', authLimiter, async (req, res) => {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // If adminKey provided, verify for admin login
-      if (adminKey) {
-        if (user.role !== 'admin') {
-          return res.status(403).json({ error: 'Admin access required' });
-        }
-        if (!user.adminKey || !(await bcrypt.compare(adminKey, user.adminKey))) {
-          return res.status(401).json({ error: 'Invalid admin key' });
+      // Check if this is an admin trying to login
+      if (user.role === 'admin') {
+        // Admin login requires 2FA
+        
+        // If twoFACode is provided, verify it
+        if (twoFACode) {
+          console.log('[AUTH] Verifying 2FA code for admin...');
+          
+          if (!user.twoFACode || !user.twoFACodeExpiry) {
+            return res.status(401).json({ error: 'No 2FA code was sent. Please request a new one.' });
+          }
+          
+          if (new Date() > user.twoFACodeExpiry) {
+            user.twoFACode = null;
+            user.twoFACodeExpiry = null;
+            await user.save();
+            return res.status(401).json({ error: '2FA code has expired. Please request a new one.' });
+          }
+          
+          if (String(twoFACode) !== String(user.twoFACode)) {
+            return res.status(401).json({ error: 'Invalid 2FA code' });
+          }
+          
+          // Clear 2FA code after successful verification
+          user.twoFACode = null;
+          user.twoFACodeExpiry = null;
+        } else {
+          // No 2FA code provided - send one to admin email
+          console.log('[AUTH] Sending 2FA code to admin email...');
+          
+          // Generate random 16-digit code
+          const twoFACode = Math.floor(Math.random() * 10000000000000000).toString().padStart(16, '0');
+          const expiry = new Date(Date.now() + 10 * 60 * 1000); // Valid for 10 minutes
+          
+          user.twoFACode = twoFACode;
+          user.twoFACodeExpiry = expiry;
+          await user.save();
+          
+          // Send email with 2FA code
+          try {
+            const { sendEmail } = require('../utils/adminNotification');
+            const htmlContent = `
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <style>
+                    body { font-family: Arial, sans-serif; background: #f5f5f5; }
+                    .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                    .header { background: #667eea; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center; }
+                    .content { padding: 20px; }
+                    .code-box { background: #f0f0f0; border: 2px solid #667eea; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0; }
+                    .code { font-size: 32px; font-weight: bold; letter-spacing: 2px; color: #667eea; font-family: monospace; }
+                    .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; }
+                  </style>
+                </head>
+                <body>
+                  <div class="container">
+                    <div class="header">
+                      <h2>🔐 Admin 2FA Code</h2>
+                    </div>
+                    <div class="content">
+                      <p>Hello Admin,</p>
+                      <p>Your 2FA verification code is:</p>
+                      <div class="code-box">
+                        <div class="code">${twoFACode}</div>
+                      </div>
+                      <p><strong>This code will expire in 10 minutes.</strong></p>
+                      <p>If you did not request this code, please ignore this email.</p>
+                    </div>
+                    <div class="footer">
+                      <p>Glimmr Admin Panel - Secure Login</p>
+                    </div>
+                  </div>
+                </body>
+              </html>
+            `;
+            
+            // Use the sendEmail function from adminNotification
+            const { Resend } = require('resend');
+            const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+            
+            if (resendClient) {
+              await resendClient.emails.send({
+                from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+                to: user.email,
+                subject: '🔐 Admin 2FA Verification Code',
+                html: htmlContent
+              });
+              console.log('[AUTH] 2FA code sent to admin email');
+            }
+          } catch (emailErr) {
+            console.error('[AUTH] Failed to send 2FA code:', emailErr.message);
+            return res.status(500).json({ error: 'Failed to send 2FA code. Please try again.' });
+          }
+          
+          return res.status(200).json({
+            message: 'A 2FA code has been sent to your email. Please enter it to continue.',
+            requiresTwoFA: true,
+            email: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') // Mask email
+          });
         }
       }
 
