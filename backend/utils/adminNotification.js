@@ -360,6 +360,12 @@ async function sendOrderNotificationToAdmin(order, user) {
   try {
     const ADMIN_EMAIL = process.env.ADMIN_EMAIL || process.env.SMTP_USER;
     
+    console.log('[ADMIN_NOTIF] ====== ADMIN EMAIL DEBUG ======');
+    console.log('[ADMIN_NOTIF] ADMIN_EMAIL env var:', process.env.ADMIN_EMAIL);
+    console.log('[ADMIN_NOTIF] SMTP_USER env var:', process.env.SMTP_USER);
+    console.log('[ADMIN_NOTIF] Final ADMIN_EMAIL value:', ADMIN_EMAIL);
+    console.log('[ADMIN_NOTIF] ================================');
+    
     if (!ADMIN_EMAIL) {
       console.warn('[ADMIN_NOTIF] ADMIN_EMAIL not configured. Skipping order notification.');
       return false;
