@@ -1127,19 +1127,18 @@ router.post('/firebase-login', authLimiter, async (req, res) => {
 // Admin login with key verification
 router.post('/admin-login', authLimiter, async (req, res) => {
   try {
-    const { email, password, adminKey } = req.body;
+    const { email, password, twoFACode } = req.body;
     console.log('[ADMIN_LOGIN] Request received:', { 
       hasEmail: !!email, 
       hasPassword: !!password, 
-      hasAdminKey: !!adminKey,
+      hasTwoFACode: !!twoFACode,
       emailLength: email ? email.length : 0,
-      passwordLength: password ? password.length : 0,
-      adminKeyLength: adminKey ? adminKey.length : 0
+      passwordLength: password ? password.length : 0
     });
     
-    if (!email || !password || !adminKey) {
-      console.error('[ADMIN_LOGIN] Missing required fields:', { email: !!email, password: !!password, adminKey: !!adminKey });
-      return res.status(400).json({ error: 'Email, password and admin key are required' });
+    if (!email || !password) {
+      console.error('[ADMIN_LOGIN] Missing required fields:', { email: !!email, password: !!password });
+      return res.status(400).json({ error: 'Email and password are required' });
     }
 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
@@ -1156,8 +1155,106 @@ router.post('/admin-login', authLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    if (!user.adminKey || !(await bcrypt.compare(adminKey, user.adminKey))) {
-      return res.status(401).json({ error: 'Invalid admin key' });
+    // Admin 2FA verification
+    if (twoFACode) {
+      console.log('[ADMIN_LOGIN] Verifying 2FA code...');
+      
+      if (!user.twoFACode || !user.twoFACodeExpiry) {
+        return res.status(401).json({ error: 'No 2FA code was sent. Please request a new one.' });
+      }
+      
+      if (new Date() > user.twoFACodeExpiry) {
+        user.twoFACode = null;
+        user.twoFACodeExpiry = null;
+        await user.save();
+        return res.status(401).json({ error: '2FA code has expired. Please request a new one.' });
+      }
+      
+      if (String(twoFACode) !== String(user.twoFACode)) {
+        return res.status(401).json({ error: 'Invalid 2FA code' });
+      }
+      
+      // Clear 2FA code after successful verification
+      user.twoFACode = null;
+      user.twoFACodeExpiry = null;
+      await user.save();
+      
+      console.log('[ADMIN_LOGIN] 2FA verified successfully');
+    } else {
+      // No 2FA code provided - generate and send one
+      console.log('[ADMIN_LOGIN] Sending 2FA code to admin email...');
+      
+      // Generate random 16-digit code
+      const twoFACode = Math.floor(Math.random() * 10000000000000000).toString().padStart(16, '0');
+      const expiry = new Date(Date.now() + 10 * 60 * 1000); // Valid for 10 minutes
+      
+      user.twoFACode = twoFACode;
+      user.twoFACodeExpiry = expiry;
+      await user.save();
+      
+      // Send email with 2FA code
+      try {
+        const { Resend } = require('resend');
+        const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+        
+        const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <style>
+                body { font-family: Arial, sans-serif; background: #f5f5f5; }
+                .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                .header { background: #667eea; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center; }
+                .content { padding: 20px; }
+                .code-box { background: #f0f0f0; border: 2px solid #667eea; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0; }
+                .code { font-size: 32px; font-weight: bold; letter-spacing: 2px; color: #667eea; font-family: monospace; }
+                .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h2>🔐 Admin 2FA Code</h2>
+                </div>
+                <div class="content">
+                  <p>Hello Admin,</p>
+                  <p>Your 2FA verification code is:</p>
+                  <div class="code-box">
+                    <div class="code">${twoFACode}</div>
+                  </div>
+                  <p><strong>This code will expire in 10 minutes.</strong></p>
+                  <p>If you did not request this code, please ignore this email.</p>
+                </div>
+                <div class="footer">
+                  <p>Glimmr Admin Panel - Secure Login</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `;
+        
+        if (resendClient) {
+          await resendClient.emails.send({
+            from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+            to: user.email,
+            subject: '🔐 Admin 2FA Verification Code',
+            html: htmlContent
+          });
+          console.log('[ADMIN_LOGIN] 2FA code sent to admin email');
+        } else {
+          console.error('[ADMIN_LOGIN] Resend client not configured');
+          return res.status(500).json({ error: 'Email service not configured' });
+        }
+      } catch (emailErr) {
+        console.error('[ADMIN_LOGIN] Failed to send 2FA code:', emailErr.message);
+        return res.status(500).json({ error: 'Failed to send 2FA code. Please try again.' });
+      }
+      
+      return res.status(200).json({
+        message: 'A 2FA code has been sent to your email. Please enter it to continue.',
+        requiresTwoFA: true,
+        email: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') // Mask email
+      });
     }
 
     const token = jwt.sign(
