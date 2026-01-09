@@ -126,11 +126,11 @@ const ProductDetail = () => {
     <div className="container mx-auto p-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="w-full">
-          <div className="relative w-full h-96 bg-slate-100 rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
+          <div className="relative w-full h-96 bg-slate-100 rounded-lg overflow-hidden shadow-lg">
             <img
               src={images[activeIndex] || getProductImage(product)}
               alt={product.name}
-              className="max-w-full max-h-full object-contain"
+              className="w-full h-full object-cover"
             />
             {images.length > 1 && (
               <>
@@ -161,7 +161,7 @@ const ProductDetail = () => {
                     idx === activeIndex ? 'border-primary' : 'border-gray-300'
                   }`}
                 >
-                  <img src={img} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-contain" />
+                  <img src={img} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover" />
                 </button>
               ))}
             </div>
