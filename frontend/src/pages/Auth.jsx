@@ -16,7 +16,8 @@ const Auth = () => {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [isAdminLogin, setIsAdminLogin] = useState(false);
-  const [adminKey, setAdminKey] = useState('');
+  const [twoFACode, setTwoFACode] = useState('');
+  const [requiresTwoFA, setRequiresTwoFA] = useState(false);
   const [invalidEmailModal, setInvalidEmailModal] = useState({
     isOpen: false,
     error: '',
@@ -37,22 +38,34 @@ const Auth = () => {
     try {
       if (mode === 'login') {
         if (isAdminLogin) {
-          // Admin login
-          console.log('[Auth] Admin login attempt:', { email, hasPassword: !!password, hasAdminKey: !!adminKey });
+          // Admin login with 2FA
+          console.log('[Auth] Admin login attempt:', { email, hasPassword: !!password, hasTwoFACode: !!twoFACode });
           
-          if (!email || !password || !adminKey) {
-            setError('Email, password and admin key are all required');
+          if (!email || !password) {
+            setError('Email and password are required');
             setLoading(false);
             return;
           }
 
-          const response = await api.post('/auth/admin-login', {
+          const payload = {
             email: email.toLowerCase().trim(),
-            password,
-            adminKey
-          });
+            password
+          };
 
-          const { token, ...userData } = response.data;
+          if (requiresTwoFA && twoFACode) {
+            payload.twoFACode = twoFACode;
+          }
+
+          const response = await api.post('/auth/admin-login', payload);
+
+          if (response.data.requiresTwoFA) {
+            setRequiresTwoFA(true);
+            setMessage(response.data.message);
+            setLoading(false);
+            return;
+          }
+
+          const { token, user: userData } = response.data;
           localStorage.setItem('token', token);
           localStorage.setItem('user', JSON.stringify(userData));
           api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -257,15 +270,16 @@ const Auth = () => {
             </div>
           )}
 
-          {isAdminLogin && (
+          {isAdminLogin && requiresTwoFA && (
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Admin Key</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">2FA Code (Check Email)</label>
               <input
-                type="password"
-                value={adminKey}
-                onChange={(e) => setAdminKey(e.target.value)}
+                type="text"
+                value={twoFACode}
+                onChange={(e) => setTwoFACode(e.target.value)}
                 className="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-gold-400 focus:ring-2 focus:ring-gold-400/20 transition-all"
-                placeholder="Enter admin key"
+                placeholder="Enter 16-digit code from email"
+                maxLength="16"
                 required
               />
             </div>

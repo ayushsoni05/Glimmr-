@@ -69,10 +69,6 @@ const Admin = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'table'
   const [productCategoryFilter, setProductCategoryFilter] = useState('');
-  const [showAdminKeyModal, setShowAdminKeyModal] = useState(false);
-  const [adminKey, setAdminKey] = useState('');
-  const [adminKeyError, setAdminKeyError] = useState('');
-  const [isAdminVerified, setIsAdminVerified] = useState(false);
   const [perGramRates, setPerGramRates] = useState({ gold: 0, silver: 0 });
   const { error: toastError, success: toastSuccess } = useToast();
 
@@ -99,7 +95,8 @@ const Admin = () => {
       return;
     }
     if (user.role !== 'admin') {
-      setShowAdminKeyModal(true);
+      // Not an admin - redirect to home
+      navigate('/');
       return;
     }
     if (activeTab === 'products') fetchProducts();
@@ -336,25 +333,6 @@ const Admin = () => {
       diamondColor: '',
       diamondClarity: '',
     });
-  };
-
-  const verifyAdminKey = async () => {
-    setActionLoading(true);
-    setAdminKeyError('');
-    try {
-      const response = await api.post('/auth/admin-login', { email: user.email, adminKey });
-      const { token, user: userData } = response.data;
-      localStorage.setItem('token', token);
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      // Update user state to admin
-      setUser(userData);
-      setIsAdminVerified(true);
-      setShowAdminKeyModal(false);
-    } catch (err) {
-      setAdminKeyError(err.response?.data?.error || 'Invalid admin key');
-    } finally {
-      setActionLoading(false);
-    }
   };
 
   return (
@@ -1248,65 +1226,6 @@ const Admin = () => {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 className="flex-1 bg-slate-300 text-slate-800 py-3 rounded-lg font-semibold hover:bg-slate-400 transition-all disabled:opacity-50"
-              >
-                ✕ Cancel
-              </motion.button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-
-      {/* Admin Key Modal */}
-      {showAdminKeyModal && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-        >
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-            className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl border border-slate-100"
-          >
-            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-amber-100 mx-auto mb-4">
-              <span className="text-2xl">🔐</span>
-            </div>
-            <h2 className="text-3xl font-bold mb-2 text-center text-slate-800">Admin Access</h2>
-            <p className="text-slate-600 mb-6 text-center">
-              Please enter your admin key to access the admin panel.
-            </p>
-            <div className="mb-4">
-              <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">Admin Key</label>
-              <input
-                type="password"
-                placeholder="Enter your admin key"
-                value={adminKey}
-                onChange={(e) => setAdminKey(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
-              />
-            </div>
-            {adminKeyError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-700 font-semibold">❌ {adminKeyError}</p>
-              </div>
-            )}
-            <div className="flex gap-3">
-              <motion.button
-                onClick={verifyAdminKey}
-                disabled={actionLoading}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="flex-1 bg-gradient-to-r from-amber-600 to-amber-700 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50"
-              >
-                {actionLoading ? '⏳ Verifying...' : '✓ Verify'}
-              </motion.button>
-              <motion.button
-                onClick={() => navigate('/')}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="flex-1 bg-slate-300 text-slate-800 py-3 rounded-lg font-semibold hover:bg-slate-400 transition-all"
               >
                 ✕ Cancel
               </motion.button>
