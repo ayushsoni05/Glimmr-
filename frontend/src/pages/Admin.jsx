@@ -23,7 +23,9 @@ const Admin = () => {
     material: '',
     karat: 24,
     weight: '',
-     images: [],
+    images: [],
+    imageUrls: [],
+    imageUrlInput: '',
     diamondHasDiamond: false,
     diamondCarat: '',
     diamondCut: '',
@@ -153,7 +155,7 @@ const Admin = () => {
     try {
       const formData = new FormData();
       Object.keys(form).forEach(key => {
-         const skip = key === 'images' || key.startsWith('diamond');
+        const skip = key === 'images' || key === 'imageUrls' || key === 'imageUrlInput' || key.startsWith('diamond');
         if (skip) return;
         if (form[key] !== null && form[key] !== '') {
           formData.append(key, form[key]);
@@ -177,6 +179,11 @@ const Admin = () => {
          Array.from(form.images).forEach(file => {
            formData.append('images', file);
          });
+       }
+
+       // Append image URLs if provided
+       if (form.imageUrls && form.imageUrls.length > 0) {
+         formData.append('imageUrls', JSON.stringify(form.imageUrls));
        }
       // Ensure category normalized
       if (form.category) {
@@ -208,6 +215,8 @@ const Admin = () => {
         karat: 24,
         weight: '',
          images: [],
+        imageUrls: [],
+        imageUrlInput: '',
         diamondHasDiamond: false,
         diamondCarat: '',
         diamondCut: '',
@@ -232,6 +241,8 @@ const Admin = () => {
       karat: product.karat || 24,
       weight: product.weight,
       images: [], // Don't pre-fill file input
+      imageUrls: Array.isArray(product.images) ? product.images : [],
+      imageUrlInput: '',
       diamondHasDiamond: product?.diamond?.hasDiamond || false,
       diamondCarat: product?.diamond?.carat ?? '',
       diamondCut: product?.diamond?.cut || '',
@@ -329,6 +340,8 @@ const Admin = () => {
       karat: 24,
       weight: '',
       images: [],
+      imageUrls: [],
+      imageUrlInput: '',
       diamondHasDiamond: false,
       diamondCarat: '',
       diamondCut: '',
@@ -639,6 +652,53 @@ const Admin = () => {
                   onChange={(e) => setForm({ ...form, images: e.target.files })} 
                   className="w-full px-4 py-3 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all text-slate-600" 
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">Image URLs (one per line or add individually)</label>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    type="url"
+                    placeholder="https://example.com/photo.jpg"
+                    value={form.imageUrlInput}
+                    onChange={(e) => setForm({ ...form, imageUrlInput: e.target.value })}
+                    className="flex-1 px-4 py-3 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all text-slate-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = (form.imageUrlInput || '').trim();
+                      if (!url) return;
+                      setForm({
+                        ...form,
+                        imageUrls: [...form.imageUrls, url],
+                        imageUrlInput: ''
+                      });
+                    }}
+                    className="px-4 py-3 bg-amber-600 text-white rounded-lg font-semibold shadow hover:bg-amber-700 transition"
+                  >
+                    + Add URL
+                  </button>
+                </div>
+                {form.imageUrls.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {form.imageUrls.map((url, idx) => (
+                      <div key={idx} className="flex items-center gap-2 px-3 py-2 rounded-full bg-amber-50 border border-amber-200 text-amber-900 text-sm">
+                        <span className="max-w-[200px] truncate" title={url}>{url}</span>
+                        <button
+                          type="button"
+                          onClick={() => setForm({
+                            ...form,
+                            imageUrls: form.imageUrls.filter((_, i) => i !== idx)
+                          })}
+                          className="text-amber-800 hover:text-amber-600"
+                          aria-label="Remove URL"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             
