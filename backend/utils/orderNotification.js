@@ -1,6 +1,13 @@
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const Order = require('../models/Order');
 const User = require('../models/User');
+
+// Initialize Resend client
+const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+console.log('[ORDER_MAIL] Resend client initialized:', !!resendClient);
+console.log('[ORDER_MAIL] RESEND_API_KEY present:', !!process.env.RESEND_API_KEY);
+console.log('[ORDER_MAIL] RESEND_FROM:', process.env.RESEND_FROM);
 
 function createMailTransport() {
   if (
@@ -27,16 +34,64 @@ function createMailTransport() {
 
 const mailTransport = createMailTransport();
 
+// Helper function to send email via Resend or fallback to SMTP
+async function sendEmail({ to, subject, html }) {
+  const from = process.env.RESEND_FROM || 'onboarding@resend.dev';
+  
+  console.log('[ORDER_EMAIL] Attempting to send...');
+  console.log('[ORDER_EMAIL] To:', to);
+  console.log('[ORDER_EMAIL] From:', from);
+  console.log('[ORDER_EMAIL] Subject:', subject);
+  console.log('[ORDER_EMAIL] Using Resend:', !!resendClient);
+  
+  if (resendClient) {
+    try {
+      const result = await resendClient.emails.send({ from, to, subject, html });
+      console.log('[ORDER_EMAIL] ✅ Sent via Resend successfully!');
+      console.log('[ORDER_EMAIL] Resend ID:', result?.id);
+      return result;
+    } catch (error) {
+      console.error('[ORDER_EMAIL] ❌ Resend failed:', error.message);
+      console.error('[ORDER_EMAIL] Full error:', JSON.stringify(error, null, 2));
+      throw error;
+    }
+  } else {
+    // Fallback to SMTP
+    try {
+      const result = await mailTransport.sendMail({
+        from: `Glimmr <${from}>`,
+        to,
+        subject,
+        html
+      });
+      console.log('[EMAIL] Sent via SMTP:', result?.messageId || 'success');
+      return result;
+    } catch (error) {
+      console.error('[EMAIL] SMTP failed:', error.message);
+      throw error;
+    }
+  }
+}
+
 async function sendOrderConfirmationEmail(order, user) {
   try {
+    console.log('[ORDER_CONFIRM] Starting to send order confirmation email...');
+    console.log('[ORDER_CONFIRM] Order ID:', order?._id);
+    console.log('[ORDER_CONFIRM] User email:', user?.email);
+    
     // Safety checks
     if (!order || !user) {
-      console.error('[NOTIFICATION] Missing order or user data');
+      console.error('[ORDER_CONFIRM] Missing order or user data');
+      return;
+    }
+
+    if (!user.email) {
+      console.error('[ORDER_CONFIRM] User has no email address');
       return;
     }
 
     if (!order.items || order.items.length === 0) {
-      console.error('[NOTIFICATION] Order has no items');
+      console.error('[ORDER_CONFIRM] Order has no items');
       return;
     }
 
@@ -304,8 +359,7 @@ async function sendOrderConfirmationEmail(order, user) {
     </html>
   `;
 
-    await mailTransport.sendMail({
-      from: `Glimmr <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
+    await sendEmail({
       to: user.email,
       subject: `✨ Order Confirmed #${order._id} - Thank You for Choosing Glimmr!`,
       html
@@ -477,8 +531,7 @@ async function sendOrderShippedEmail(order, user) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: `Glimmr <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
+    await sendEmail({
       to: user.email,
       subject: `🚚 Order Shipped #${order._id}`,
       html
@@ -613,8 +666,7 @@ async function sendOrderDeliveredEmail(order, user) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: `Glimmr <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
+    await sendEmail({
       to: user.email,
       subject: `🎉 Order Delivered #${order._id}`,
       html
@@ -724,8 +776,7 @@ async function sendGenericStatusUpdateEmail(order, user, status) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: `Glimmr <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
+    await sendEmail({
       to: user.email,
       subject: `${config.emoji} Order Update: ${config.title} - #${order._id}`,
       html
@@ -738,14 +789,19 @@ async function sendGenericStatusUpdateEmail(order, user, status) {
 
 async function notifyOrderStatusChange(orderId, newStatus) {
   try {
+    console.log('[NOTIFY_STATUS] Starting status change notification...');
+    console.log('[NOTIFY_STATUS] Order ID:', orderId);
+    console.log('[NOTIFY_STATUS] New status:', newStatus);
+    
     const order = await Order.findById(orderId).populate('user').populate('items.product');
     
     if (!order || !order.user) {
-      console.error('[NOTIFICATION] Order or user not found');
+      console.error('[NOTIFY_STATUS] Order or user not found');
       return;
     }
 
     const user = order.user;
+    console.log('[NOTIFY_STATUS] User email:', user?.email);
 
     // Ensure legacy orders have required structures
     if (!order.notificationsSent) {
@@ -755,17 +811,23 @@ async function notifyOrderStatusChange(orderId, newStatus) {
       order.statusHistory = [];
     }
 
+    console.log('[NOTIFY_STATUS] Notifications sent tracker:', order.notificationsSent);
+
     // Send email based on status
     if (newStatus === 'confirmed' && !order.notificationsSent.confirmed) {
+      console.log('[NOTIFY_STATUS] Sending order confirmation email...');
       await sendOrderConfirmationEmail(order, user);
       order.notificationsSent.confirmed = true;
     } else if (newStatus === 'shipped' && !order.notificationsSent.shipped) {
+      console.log('[NOTIFY_STATUS] Sending order shipped email...');
       await sendOrderShippedEmail(order, user);
       order.notificationsSent.shipped = true;
     } else if (newStatus === 'delivered' && !order.notificationsSent.delivered) {
+      console.log('[NOTIFY_STATUS] Sending order delivered email...');
       await sendOrderDeliveredEmail(order, user);
       order.notificationsSent.delivered = true;
     } else {
+      console.log('[NOTIFY_STATUS] Sending generic status update email...');
       // For all other statuses (pending, processing, cancelled, returned), send generic update
       await sendGenericStatusUpdateEmail(order, user, newStatus);
     }

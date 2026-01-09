@@ -129,11 +129,11 @@ router.post('/', async (req, res) => {
     let perGramRates = { goldPerGram: 6500, silverPerGram: 75 }; // defaults
     const startTime = Date.now();
     try {
-      // Add race condition with 8 second timeout to ensure order processing doesn't hang
+      // Reduce timeout to 3 seconds to ensure fast order processing
       perGramRates = await Promise.race([
         fetchPerGramRates('INR'),
         new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Rate fetch timeout - using fallback rates')), 8000)
+          setTimeout(() => reject(new Error('Rate fetch timeout - using fallback rates')), 3000)
         )
       ]);
       console.log('[ORDER] Live rates fetched in', Date.now() - startTime, 'ms - Gold: ₹' + perGramRates.goldPerGram + '/g, Silver: ₹' + perGramRates.silverPerGram + '/g');
@@ -204,41 +204,42 @@ router.post('/', async (req, res) => {
 
     await order.save();
 
-    // Send confirmation notification (non-blocking) - for both logged-in and guest users
-    try {
-      let user = null;
-      if (userId) {
-        user = await User.findById(userId);
-        if (user) {
-          // Send order status notification to customer
-          await notifyOrderStatusChange(order._id, 'confirmed').catch(err => 
-            console.error('Failed to send order status notification:', err.message)
-          );
-        }
-      }
-      
-      // Send admin notification about new order (for ALL orders - guest or logged-in)
-      console.log('[ORDER] Preparing to send admin notification...');
-      const populatedOrder = await Order.findById(order._id).populate('items.product');
-      
-      // For guest orders, create a temporary user object with shipping address details
-      const notificationUser = user || {
-        name: shippingAddress?.name || 'Guest Customer',
-        email: shippingAddress?.email || 'guest@order.com',
-        phone: shippingAddress?.phone || 'N/A'
-      };
-      
-      const adminNotifResult = await sendOrderNotificationToAdmin(populatedOrder, notificationUser);
-      console.log('[ORDER] Admin notification result:', adminNotifResult ? 'SUCCESS' : 'FAILED');
-      
-    } catch (notifError) {
-      console.error('[ORDER] Notification error (non-critical):', notifError);
-      // Don't fail the order creation if notifications fail
-    }
-
-    // Clear cart
+    // Clear cart immediately
     cart.items = [];
     await cart.save();
+
+    // Send notifications asynchronously (fire and forget - don't block response)
+    setImmediate(async () => {
+      try {
+        let user = null;
+        if (userId) {
+          user = await User.findById(userId);
+          if (user) {
+            // Send order status notification to customer
+            await notifyOrderStatusChange(order._id, 'confirmed').catch(err => 
+              console.error('Failed to send order status notification:', err.message)
+            );
+          }
+        }
+        
+        // Send admin notification about new order (for ALL orders - guest or logged-in)
+        console.log('[ORDER] Preparing to send admin notification...');
+        const populatedOrder = await Order.findById(order._id).populate('items.product');
+        
+        // For guest orders, create a temporary user object with shipping address details
+        const notificationUser = user || {
+          name: shippingAddress?.name || 'Guest Customer',
+          email: shippingAddress?.email || 'guest@order.com',
+          phone: shippingAddress?.phone || 'N/A'
+        };
+        
+        const adminNotifResult = await sendOrderNotificationToAdmin(populatedOrder, notificationUser);
+        console.log('[ORDER] Admin notification result:', adminNotifResult ? 'SUCCESS' : 'FAILED');
+        
+      } catch (notifError) {
+        console.error('[ORDER] Notification error (non-critical):', notifError);
+      }
+    });
 
     res.status(201).json({
       message: 'Order created successfully',

@@ -23,7 +23,7 @@ const Admin = () => {
     material: '',
     karat: 24,
     weight: '',
-    image: null,
+    images: [],
     diamondHasDiamond: false,
     diamondCarat: '',
     diamondCut: '',
@@ -69,10 +69,6 @@ const Admin = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'table'
   const [productCategoryFilter, setProductCategoryFilter] = useState('');
-  const [showAdminKeyModal, setShowAdminKeyModal] = useState(false);
-  const [adminKey, setAdminKey] = useState('');
-  const [adminKeyError, setAdminKeyError] = useState('');
-  const [isAdminVerified, setIsAdminVerified] = useState(false);
   const [perGramRates, setPerGramRates] = useState({ gold: 0, silver: 0 });
   const { error: toastError, success: toastSuccess } = useToast();
 
@@ -99,7 +95,8 @@ const Admin = () => {
       return;
     }
     if (user.role !== 'admin') {
-      setShowAdminKeyModal(true);
+      // Not an admin - redirect to home
+      navigate('/');
       return;
     }
     if (activeTab === 'products') fetchProducts();
@@ -156,7 +153,7 @@ const Admin = () => {
     try {
       const formData = new FormData();
       Object.keys(form).forEach(key => {
-        const skip = key === 'image' || key.startsWith('diamond');
+        const skip = key === 'images' || key.startsWith('diamond');
         if (skip) return;
         if (form[key] !== null && form[key] !== '') {
           formData.append(key, form[key]);
@@ -174,9 +171,11 @@ const Admin = () => {
         if (form.diamondClarity) formData.set('diamond.clarity', form.diamondClarity);
       }
       
-      // Append image file if provided
-      if (form.image) {
-        formData.append('image', form.image);
+      // Append image files if provided
+      if (form.images && form.images.length > 0) {
+        Array.from(form.images).forEach((file) => {
+          if (file) formData.append('images', file);
+        });
       }
       
       // Ensure category normalized
@@ -208,7 +207,7 @@ const Admin = () => {
         material: '',
         karat: 24,
         weight: '',
-        image: null,
+        images: [],
         diamondHasDiamond: false,
         diamondCarat: '',
         diamondCut: '',
@@ -232,7 +231,7 @@ const Admin = () => {
       material: product.material,
       karat: product.karat || 24,
       weight: product.weight,
-      image: null, // Don't pre-fill file input
+      images: [], // Don't pre-fill file input
       diamondHasDiamond: product?.diamond?.hasDiamond || false,
       diamondCarat: product?.diamond?.carat ?? '',
       diamondCut: product?.diamond?.cut || '',
@@ -329,32 +328,13 @@ const Admin = () => {
       material: '',
       karat: 24,
       weight: '',
-      image: null,
+      images: [],
       diamondHasDiamond: false,
       diamondCarat: '',
       diamondCut: '',
       diamondColor: '',
       diamondClarity: '',
     });
-  };
-
-  const verifyAdminKey = async () => {
-    setActionLoading(true);
-    setAdminKeyError('');
-    try {
-      const response = await api.post('/auth/admin-login', { email: user.email, adminKey });
-      const { token, user: userData } = response.data;
-      localStorage.setItem('token', token);
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      // Update user state to admin
-      setUser(userData);
-      setIsAdminVerified(true);
-      setShowAdminKeyModal(false);
-    } catch (err) {
-      setAdminKeyError(err.response?.data?.error || 'Invalid admin key');
-    } finally {
-      setActionLoading(false);
-    }
   };
 
   return (
@@ -651,13 +631,15 @@ const Admin = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">Product Image</label>
+                <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">Product Images</label>
                 <input 
                   type="file" 
                   accept="image/*" 
-                  onChange={(e) => setForm({ ...form, image: e.target.files[0] })} 
+                  multiple
+                  onChange={(e) => setForm({ ...form, images: e.target.files })} 
                   className="w-full px-4 py-3 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all text-slate-600" 
                 />
+                <p className="text-xs text-slate-500 mt-1">You can upload up to 10 images. Uploading new images will replace existing ones.</p>
               </div>
             </div>
             
@@ -1248,65 +1230,6 @@ const Admin = () => {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 className="flex-1 bg-slate-300 text-slate-800 py-3 rounded-lg font-semibold hover:bg-slate-400 transition-all disabled:opacity-50"
-              >
-                ✕ Cancel
-              </motion.button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-
-      {/* Admin Key Modal */}
-      {showAdminKeyModal && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-        >
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-            className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl border border-slate-100"
-          >
-            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-amber-100 mx-auto mb-4">
-              <span className="text-2xl">🔐</span>
-            </div>
-            <h2 className="text-3xl font-bold mb-2 text-center text-slate-800">Admin Access</h2>
-            <p className="text-slate-600 mb-6 text-center">
-              Please enter your admin key to access the admin panel.
-            </p>
-            <div className="mb-4">
-              <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">Admin Key</label>
-              <input
-                type="password"
-                placeholder="Enter your admin key"
-                value={adminKey}
-                onChange={(e) => setAdminKey(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
-              />
-            </div>
-            {adminKeyError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-700 font-semibold">❌ {adminKeyError}</p>
-              </div>
-            )}
-            <div className="flex gap-3">
-              <motion.button
-                onClick={verifyAdminKey}
-                disabled={actionLoading}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="flex-1 bg-gradient-to-r from-amber-600 to-amber-700 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50"
-              >
-                {actionLoading ? '⏳ Verifying...' : '✓ Verify'}
-              </motion.button>
-              <motion.button
-                onClick={() => navigate('/')}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="flex-1 bg-slate-300 text-slate-800 py-3 rounded-lg font-semibold hover:bg-slate-400 transition-all"
               >
                 ✕ Cancel
               </motion.button>

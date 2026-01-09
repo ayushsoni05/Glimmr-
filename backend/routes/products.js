@@ -44,11 +44,11 @@ router.get('/', getProducts);
 // GET /api/products/:id
 router.get('/:id', getProductById);
 
-// POST /api/products - admin create
-router.post('/', adminAuth, upload.single('image'), createProduct);
+// POST /api/products - admin create (support multiple images)
+router.post('/', adminAuth, upload.array('images', 10), createProduct);
 
-// PUT /api/products/:id - admin edit
-router.put('/:id', adminAuth, upload.single('image'), updateProduct);
+// PUT /api/products/:id - admin edit (support multiple images)
+router.put('/:id', adminAuth, upload.array('images', 10), updateProduct);
 
 // DELETE /api/products/:id - admin delete
 router.delete('/:id', adminAuth, deleteProduct);

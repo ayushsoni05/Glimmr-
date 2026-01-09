@@ -102,6 +102,14 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     addresses: [addressSchema],
+    twoFACode: {
+      type: String,
+      default: null,
+    },
+    twoFACodeExpiry: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

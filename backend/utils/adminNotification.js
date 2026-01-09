@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
 let mailTransport = null;
 
@@ -35,6 +36,56 @@ function createMailTransport() {
 
 // Initialize mail transport
 mailTransport = createMailTransport();
+
+// Initialize Resend client if configured
+const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const FROM_EMAIL = process.env.RESEND_FROM || 'onboarding@resend.dev';
+
+console.log('[MAIL] Resend client initialized:', !!resendClient);
+console.log('[MAIL] FROM_EMAIL configured:', FROM_EMAIL);
+
+async function sendEmail({ to, subject, html, text }) {
+  console.log('[EMAIL] Attempting to send email...');
+  console.log('[EMAIL] To:', to);
+  console.log('[EMAIL] From:', FROM_EMAIL);
+  console.log('[EMAIL] Subject:', subject);
+  console.log('[EMAIL] Using Resend:', !!resendClient);
+  
+  if (resendClient) {
+    try {
+      const result = await resendClient.emails.send({
+        from: FROM_EMAIL,
+        to,
+        subject,
+        html,
+      });
+      console.log('[EMAIL] ✅ Sent via Resend successfully!');
+      console.log('[EMAIL] Resend ID:', result?.id);
+      return result;
+    } catch (error) {
+      console.error('[EMAIL] ❌ Resend failed:', error.message);
+      console.error('[EMAIL] Full error:', JSON.stringify(error, null, 2));
+      throw error;
+    }
+  } else {
+    try {
+      const result = await mailTransport.sendMail({
+        from: `Glimmr <${FROM_EMAIL}>`,
+        to,
+        subject,
+        html,
+        text,
+      });
+      console.log('[EMAIL] Sent via SMTP:', result?.messageId || 'success');
+      return result;
+    } catch (error) {
+      console.error('[EMAIL] SMTP failed:', error.message);
+      throw error;
+    }
+  }
+}
+
+ 
 
 /**
  * Send admin notification email when a new user signs up
@@ -132,12 +183,10 @@ Email Verified: ${user.emailVerified ? 'Yes' : 'Pending'}
 This is an automated notification from Glimmr Admin Panel.
     `;
 
-    await mailTransport.sendMail({
-      from: process.env.SMTP_USER || 'noreply@glimmr.com',
+    await sendEmail({
       to: ADMIN_EMAIL,
       subject: `🎉 New User Registration: ${user.name || user.email}`,
-      html: htmlContent,
-      text: textContent,
+      html: htmlContent
     });
 
     console.log(`Admin notification sent for user: ${user.email}`);
@@ -197,11 +246,10 @@ async function sendSuspiciousActivityAlert(alertDetails) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: process.env.SMTP_USER || 'noreply@glimmr.com',
+    await sendEmail({
       to: ADMIN_EMAIL,
       subject: `⚠️ Suspicious Activity: ${alertDetails.type || 'Alert'}`,
-      html: htmlContent,
+      html: htmlContent
     });
 
     console.log('Suspicious activity alert sent to admin');
@@ -291,11 +339,10 @@ async function sendLoginNotificationToAdmin(user, loginDetails = {}) {
       </html>
     `;
 
-    await mailTransport.sendMail({
-      from: process.env.SMTP_USER || 'noreply@glimmr.com',
+    await sendEmail({
       to: ADMIN_EMAIL,
       subject: `🔐 User Login: ${user.name || user.email}`,
-      html: htmlContent,
+      html: htmlContent
     });
 
     console.log(`Admin login notification sent for user: ${user.email}`);
@@ -313,6 +360,12 @@ async function sendOrderNotificationToAdmin(order, user) {
   try {
     const ADMIN_EMAIL = process.env.ADMIN_EMAIL || process.env.SMTP_USER;
     
+    console.log('[ADMIN_NOTIF] ====== ADMIN EMAIL DEBUG ======');
+    console.log('[ADMIN_NOTIF] ADMIN_EMAIL env var:', process.env.ADMIN_EMAIL);
+    console.log('[ADMIN_NOTIF] SMTP_USER env var:', process.env.SMTP_USER);
+    console.log('[ADMIN_NOTIF] Final ADMIN_EMAIL value:', ADMIN_EMAIL);
+    console.log('[ADMIN_NOTIF] ================================');
+    
     if (!ADMIN_EMAIL) {
       console.warn('[ADMIN_NOTIF] ADMIN_EMAIL not configured. Skipping order notification.');
       return false;
@@ -328,8 +381,8 @@ async function sendOrderNotificationToAdmin(order, user) {
       timeStyle: 'short'
     });
 
-    // Image base URL (admin wants product thumbnails)
-    const imageBase = (process.env.IMAGE_BASE_URL || process.env.BACKEND_URL || 'http://127.0.0.1:5002').replace(/\/$/, '');
+    // Image base URL (force https to avoid mixed-content blocking in emails)
+    const imageBase = (process.env.IMAGE_BASE_URL || process.env.BACKEND_URL || 'https://glimmr-jewellry-e-commerce-platform-5.onrender.com').replace(/\/$/, '');
 
     // Build item rows with images and line totals
     const itemsList = order.items.map(item => {
@@ -501,19 +554,15 @@ async function sendOrderNotificationToAdmin(order, user) {
     `;
 
     console.log('[ADMIN_NOTIF] Attempting to send email...');
-    console.log('[ADMIN_NOTIF] From:', process.env.MAIL_FROM || process.env.SMTP_USER);
     console.log('[ADMIN_NOTIF] To:', ADMIN_EMAIL);
     
-    const result = await mailTransport.sendMail({
-      from: `"Glimmr Orders" <${process.env.MAIL_FROM || process.env.SMTP_USER || 'noreply@glimmr.com'}>`,
+    await sendEmail({
       to: ADMIN_EMAIL,
       subject: `🛒 New Order #${order._id.toString().slice(-6)} - ₹${order.totalAmount.toLocaleString('en-IN')}`,
-      html: htmlContent,
+      html: htmlContent
     });
 
     console.log('[ADMIN_NOTIF] ✅ Email sent successfully');
-    console.log('[ADMIN_NOTIF] Message ID:', result.messageId);
-    console.log('[ADMIN_NOTIF] Response:', result.response);
     return true;
   } catch (error) {
     console.error('[ADMIN_NOTIF] ❌ Error sending admin order notification:', error.message || error);

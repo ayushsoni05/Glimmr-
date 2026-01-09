@@ -297,9 +297,9 @@ const createProduct = async (req, res) => {
       else productData.price = 0;
     }
 
-    if (req.file) {
-      // Store path under /api/uploads so frontend dev server proxy can resolve correctly
-      productData.images = [`/api/uploads/products/${req.file.filename}`];
+    if (req.files && req.files.length > 0) {
+      // Store each uploaded image path
+      productData.images = req.files.map(f => `/api/uploads/products/${f.filename}`);
     } else if (!productData.images || productData.images.length === 0) {
       // Set image based on category and material instead of generic placeholder
       const defaultImage = getImageForCategoryAndMaterial(productData.category, productData.material);
@@ -311,7 +311,7 @@ const createProduct = async (req, res) => {
       material: productData.material,
       price: productData.price,
       weight: productData.weight,
-      hasFile: !!req.file
+      filesCount: Array.isArray(req.files) ? req.files.length : 0
     });
     const product = new Product(productData);
     await product.save();
@@ -343,8 +343,8 @@ const updateProduct = async (req, res) => {
     if (updateData.price !== undefined) updateData.price = Number(updateData.price);
     if (updateData.weight !== undefined) updateData.weight = Number(updateData.weight);
     if (updateData.karat !== undefined) updateData.karat = Number(updateData.karat);
-    if (req.file) {
-      updateData.images = [`/api/uploads/products/${req.file.filename}`];
+    if (req.files && req.files.length > 0) {
+      updateData.images = req.files.map(f => `/api/uploads/products/${f.filename}`);
     } else if (updateData.category || updateData.material) {
       // If category or material is being updated and no new file, update image accordingly
       let product = await Product.findById(req.params.id);

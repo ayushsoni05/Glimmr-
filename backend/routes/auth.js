@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 // Twilio removed: prefer Firebase client-side phone auth
 const crypto = require('crypto');
 const admin = require('firebase-admin');
@@ -31,6 +32,7 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 // We still `require('firebase-admin')` here to access the module if it
 // was initialized by the server process, but we do not initialize it here.
 
+const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const mailTransport = createMailTransport();
 // Server-side SMS provider removed in favor of Firebase client-side phone auth
 
@@ -47,29 +49,39 @@ function auditSmsEvent(event) {
 }
 
 function createMailTransport() {
-  if (
-    process.env.SMTP_HOST &&
-    process.env.SMTP_PORT &&
-    process.env.SMTP_USER &&
-    process.env.SMTP_PASS
-  ) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+  // Support both existing names and new Gmail app password names
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = Number(process.env.SMTP_PORT || 587);
+  const secure = process.env.SMTP_SECURE === 'true' ? true : false; // Render + Gmail uses STARTTLS on 587
+  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL;
+  const pass = process.env.SMTP_PASS || process.env.SMTP_APP_PASSWORD;
+
+  if (user && pass) {
+    const transport = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
     });
+
+    // Log verification result at startup to surface SMTP connectivity issues
+    transport.verify((err) => {
+      if (err) {
+        console.error('[SMTP] Transport verify failed:', err && err.message ? err.message : err);
+      } else {
+        console.log('[SMTP] Transport verified:', { host, port, secure });
+      }
+    });
+
+    return transport;
   }
 
   console.warn(
-    'SMTP credentials not configured. Falling back to console email logger. Configure SMTP_* env vars for production.'
+    'SMTP credentials not configured. Falling back to console email logger. Configure SMTP_* or SMTP_EMAIL/SMTP_APP_PASSWORD env vars for production.'
   );
-  return nodemailer.createTransport({
-    jsonTransport: true,
-  });
+  return nodemailer.createTransport({ jsonTransport: true });
 }
 
 // NOTE: Twilio has been removed. For phone verification, use Firebase client-side
@@ -179,18 +191,14 @@ const buildOtpExpiry = () =>
   new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
 async function sendOtpEmail(email, otp, context) {
-  console.log('[OTP_EMAIL] Attempting to send OTP email...');
+  console.log('[OTP_EMAIL] Attempting to send OTP email via Resend...');
   console.log('[OTP_EMAIL] To:', email);
   console.log('[OTP_EMAIL] Context:', context);
   console.log('[OTP_EMAIL] ***** OTP CODE:', otp, '*****'); // Log OTP for development/testing
-  console.log('[OTP_EMAIL] SMTP Config:', {
-    host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT,
-    user: process.env.SMTP_USER,
-    from: process.env.MAIL_FROM || process.env.SMTP_USER
-  });
 
   const subject = `Your ${context} OTP - Glimmr`;
+  const from = process.env.RESEND_FROM || process.env.MAIL_FROM || 'onboarding@resend.dev';
+
   const html = `
     <!DOCTYPE html>
     <html>
@@ -225,28 +233,23 @@ async function sendOtpEmail(email, otp, context) {
     </html>
   `;
 
-  const message = {
-    from: `"Glimmr Jewelry" <${process.env.MAIL_FROM || process.env.SMTP_USER || 'no-reply@glimmr.local'}>`,
-    to: email,
-    subject,
-    text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
-    html,
-  };
+  if (!resendClient) {
+    console.error('[OTP_EMAIL] Resend client not configured. Set RESEND_API_KEY.');
+    throw new Error('Email service unavailable');
+  }
 
   try {
-    const result = await mailTransport.sendMail(message);
-    console.log('[OTP_EMAIL] ✅ Email sent successfully');
-    console.log('[OTP_EMAIL] Message ID:', result && result.messageId);
-    console.log('[OTP_EMAIL] Response:', result && result.response);
-    console.log('[OTP_EMAIL] Accepted:', result && result.accepted);
-    console.log('[OTP_EMAIL] Rejected:', result && result.rejected);
-    if (result && result.rejected && result.rejected.length) {
-      console.warn('[OTP_EMAIL] Warning: Some recipients were rejected by SMTP');
-    }
+    const result = await resendClient.emails.send({
+      from,
+      to: email,
+      subject,
+      html,
+      text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
+    });
+    console.log('[OTP_EMAIL] ✅ Email sent via Resend:', result && result.id ? result.id : 'no-id');
     return result;
   } catch (error) {
-    console.error('[OTP_EMAIL] ❌ Failed to send email:', error.message);
-    console.error('[OTP_EMAIL] Error details:', error);
+    console.error('[OTP_EMAIL] ❌ Resend send failed:', error && error.message ? error.message : error);
     throw error;
   }
 }
@@ -482,7 +485,7 @@ router.post('/login', authLimiter, async (req, res) => {
     }
     // Both email and phone are accepted as identity fields. Phone verification
     // is expected to be performed client-side via Firebase when configured.
-    const { password, adminKey } = req.body;
+    const { password, adminKey, twoFACode } = req.body;
     const user = await findUserByIdentity(identity);
     if (!user) {
       return res.status(404).json({ error: 'User not found. Please sign up first.' });
@@ -499,13 +502,106 @@ router.post('/login', authLimiter, async (req, res) => {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // If adminKey provided, verify for admin login
-      if (adminKey) {
-        if (user.role !== 'admin') {
-          return res.status(403).json({ error: 'Admin access required' });
-        }
-        if (!user.adminKey || !(await bcrypt.compare(adminKey, user.adminKey))) {
-          return res.status(401).json({ error: 'Invalid admin key' });
+      // Check if this is an admin trying to login
+      if (user.role === 'admin') {
+        // Admin login requires 2FA
+        
+        // If twoFACode is provided, verify it
+        if (twoFACode) {
+          console.log('[AUTH] Verifying 2FA code for admin...');
+          
+          if (!user.twoFACode || !user.twoFACodeExpiry) {
+            return res.status(401).json({ error: 'No 2FA code was sent. Please request a new one.' });
+          }
+          
+          if (new Date() > user.twoFACodeExpiry) {
+            user.twoFACode = null;
+            user.twoFACodeExpiry = null;
+            await user.save();
+            return res.status(401).json({ error: '2FA code has expired. Please request a new one.' });
+          }
+          
+          if (String(twoFACode) !== String(user.twoFACode)) {
+            return res.status(401).json({ error: 'Invalid 2FA code' });
+          }
+          
+          // Clear 2FA code after successful verification
+          user.twoFACode = null;
+          user.twoFACodeExpiry = null;
+        } else {
+          // No 2FA code provided - send one to admin email
+          console.log('[AUTH] Sending 2FA code to admin email...');
+          
+          // Generate random 16-digit code
+          const twoFACode = Math.floor(Math.random() * 10000000000000000).toString().padStart(16, '0');
+          const expiry = new Date(Date.now() + 10 * 60 * 1000); // Valid for 10 minutes
+          
+          user.twoFACode = twoFACode;
+          user.twoFACodeExpiry = expiry;
+          await user.save();
+          
+          // Send email with 2FA code
+          try {
+            const { sendEmail } = require('../utils/adminNotification');
+            const htmlContent = `
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <style>
+                    body { font-family: Arial, sans-serif; background: #f5f5f5; }
+                    .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                    .header { background: #667eea; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center; }
+                    .content { padding: 20px; }
+                    .code-box { background: #f0f0f0; border: 2px solid #667eea; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0; }
+                    .code { font-size: 32px; font-weight: bold; letter-spacing: 2px; color: #667eea; font-family: monospace; }
+                    .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; }
+                  </style>
+                </head>
+                <body>
+                  <div class="container">
+                    <div class="header">
+                      <h2>🔐 Admin 2FA Code</h2>
+                    </div>
+                    <div class="content">
+                      <p>Hello Admin,</p>
+                      <p>Your 2FA verification code is:</p>
+                      <div class="code-box">
+                        <div class="code">${twoFACode}</div>
+                      </div>
+                      <p><strong>This code will expire in 10 minutes.</strong></p>
+                      <p>If you did not request this code, please ignore this email.</p>
+                    </div>
+                    <div class="footer">
+                      <p>Glimmr Admin Panel - Secure Login</p>
+                    </div>
+                  </div>
+                </body>
+              </html>
+            `;
+            
+            // Use the sendEmail function from adminNotification
+            const { Resend } = require('resend');
+            const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+            
+            if (resendClient) {
+              await resendClient.emails.send({
+                from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+                to: user.email,
+                subject: '🔐 Admin 2FA Verification Code',
+                html: htmlContent
+              });
+              console.log('[AUTH] 2FA code sent to admin email');
+            }
+          } catch (emailErr) {
+            console.error('[AUTH] Failed to send 2FA code:', emailErr.message);
+            return res.status(500).json({ error: 'Failed to send 2FA code. Please try again.' });
+          }
+          
+          return res.status(200).json({
+            message: 'A 2FA code has been sent to your email. Please enter it to continue.',
+            requiresTwoFA: true,
+            email: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') // Mask email
+          });
         }
       }
 
@@ -1031,19 +1127,18 @@ router.post('/firebase-login', authLimiter, async (req, res) => {
 // Admin login with key verification
 router.post('/admin-login', authLimiter, async (req, res) => {
   try {
-    const { email, password, adminKey } = req.body;
+    const { email, password, twoFACode } = req.body;
     console.log('[ADMIN_LOGIN] Request received:', { 
       hasEmail: !!email, 
       hasPassword: !!password, 
-      hasAdminKey: !!adminKey,
+      hasTwoFACode: !!twoFACode,
       emailLength: email ? email.length : 0,
-      passwordLength: password ? password.length : 0,
-      adminKeyLength: adminKey ? adminKey.length : 0
+      passwordLength: password ? password.length : 0
     });
     
-    if (!email || !password || !adminKey) {
-      console.error('[ADMIN_LOGIN] Missing required fields:', { email: !!email, password: !!password, adminKey: !!adminKey });
-      return res.status(400).json({ error: 'Email, password and admin key are required' });
+    if (!email || !password) {
+      console.error('[ADMIN_LOGIN] Missing required fields:', { email: !!email, password: !!password });
+      return res.status(400).json({ error: 'Email and password are required' });
     }
 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
@@ -1060,8 +1155,106 @@ router.post('/admin-login', authLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    if (!user.adminKey || !(await bcrypt.compare(adminKey, user.adminKey))) {
-      return res.status(401).json({ error: 'Invalid admin key' });
+    // Admin 2FA verification
+    if (twoFACode) {
+      console.log('[ADMIN_LOGIN] Verifying 2FA code...');
+      
+      if (!user.twoFACode || !user.twoFACodeExpiry) {
+        return res.status(401).json({ error: 'No 2FA code was sent. Please request a new one.' });
+      }
+      
+      if (new Date() > user.twoFACodeExpiry) {
+        user.twoFACode = null;
+        user.twoFACodeExpiry = null;
+        await user.save();
+        return res.status(401).json({ error: '2FA code has expired. Please request a new one.' });
+      }
+      
+      if (String(twoFACode) !== String(user.twoFACode)) {
+        return res.status(401).json({ error: 'Invalid 2FA code' });
+      }
+      
+      // Clear 2FA code after successful verification
+      user.twoFACode = null;
+      user.twoFACodeExpiry = null;
+      await user.save();
+      
+      console.log('[ADMIN_LOGIN] 2FA verified successfully');
+    } else {
+      // No 2FA code provided - generate and send one
+      console.log('[ADMIN_LOGIN] Sending 2FA code to admin email...');
+      
+      // Generate random 16-digit code
+      const twoFACode = Math.floor(Math.random() * 10000000000000000).toString().padStart(16, '0');
+      const expiry = new Date(Date.now() + 10 * 60 * 1000); // Valid for 10 minutes
+      
+      user.twoFACode = twoFACode;
+      user.twoFACodeExpiry = expiry;
+      await user.save();
+      
+      // Send email with 2FA code
+      try {
+        const { Resend } = require('resend');
+        const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+        
+        const htmlContent = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <style>
+                body { font-family: Arial, sans-serif; background: #f5f5f5; }
+                .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                .header { background: #667eea; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center; }
+                .content { padding: 20px; }
+                .code-box { background: #f0f0f0; border: 2px solid #667eea; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0; }
+                .code { font-size: 32px; font-weight: bold; letter-spacing: 2px; color: #667eea; font-family: monospace; }
+                .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h2>🔐 Admin 2FA Code</h2>
+                </div>
+                <div class="content">
+                  <p>Hello Admin,</p>
+                  <p>Your 2FA verification code is:</p>
+                  <div class="code-box">
+                    <div class="code">${twoFACode}</div>
+                  </div>
+                  <p><strong>This code will expire in 10 minutes.</strong></p>
+                  <p>If you did not request this code, please ignore this email.</p>
+                </div>
+                <div class="footer">
+                  <p>Glimmr Admin Panel - Secure Login</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `;
+        
+        if (resendClient) {
+          await resendClient.emails.send({
+            from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+            to: user.email,
+            subject: '🔐 Admin 2FA Verification Code',
+            html: htmlContent
+          });
+          console.log('[ADMIN_LOGIN] 2FA code sent to admin email');
+        } else {
+          console.error('[ADMIN_LOGIN] Resend client not configured');
+          return res.status(500).json({ error: 'Email service not configured' });
+        }
+      } catch (emailErr) {
+        console.error('[ADMIN_LOGIN] Failed to send 2FA code:', emailErr.message);
+        return res.status(500).json({ error: 'Failed to send 2FA code. Please try again.' });
+      }
+      
+      return res.status(200).json({
+        message: 'A 2FA code has been sent to your email. Please enter it to continue.',
+        requiresTwoFA: true,
+        email: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') // Mask email
+      });
     }
 
     const token = jwt.sign(
