@@ -23,7 +23,7 @@ const Admin = () => {
     material: '',
     karat: 24,
     weight: '',
-    image: null,
+     images: [],
     diamondHasDiamond: false,
     diamondCarat: '',
     diamondCut: '',
@@ -153,7 +153,7 @@ const Admin = () => {
     try {
       const formData = new FormData();
       Object.keys(form).forEach(key => {
-        const skip = key === 'image' || key.startsWith('diamond');
+         const skip = key === 'images' || key.startsWith('diamond');
         if (skip) return;
         if (form[key] !== null && form[key] !== '') {
           formData.append(key, form[key]);
@@ -171,11 +171,13 @@ const Admin = () => {
         if (form.diamondClarity) formData.set('diamond.clarity', form.diamondClarity);
       }
       
-      // Append image file if provided
-      if (form.image) {
-        formData.append('image', form.image);
-      }
       
+       // Append multiple image files if provided
+       if (form.images && form.images.length > 0) {
+         Array.from(form.images).forEach(file => {
+           formData.append('images', file);
+         });
+       }
       // Ensure category normalized
       if (form.category) {
         formData.set('category', form.category.trim().toLowerCase());
@@ -205,7 +207,7 @@ const Admin = () => {
         material: '',
         karat: 24,
         weight: '',
-        image: null,
+         images: [],
         diamondHasDiamond: false,
         diamondCarat: '',
         diamondCut: '',
@@ -229,7 +231,7 @@ const Admin = () => {
       material: product.material,
       karat: product.karat || 24,
       weight: product.weight,
-      image: null, // Don't pre-fill file input
+      images: [], // Don't pre-fill file input
       diamondHasDiamond: product?.diamond?.hasDiamond || false,
       diamondCarat: product?.diamond?.carat ?? '',
       diamondCut: product?.diamond?.cut || '',
@@ -326,7 +328,7 @@ const Admin = () => {
       material: '',
       karat: 24,
       weight: '',
-      image: null,
+      images: [],
       diamondHasDiamond: false,
       diamondCarat: '',
       diamondCut: '',
@@ -629,11 +631,12 @@ const Admin = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">Product Image</label>
+                <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">Product Images</label>
                 <input 
                   type="file" 
                   accept="image/*" 
-                  onChange={(e) => setForm({ ...form, image: e.target.files[0] })} 
+                  multiple
+                  onChange={(e) => setForm({ ...form, images: e.target.files })} 
                   className="w-full px-4 py-3 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all text-slate-600" 
                 />
               </div>

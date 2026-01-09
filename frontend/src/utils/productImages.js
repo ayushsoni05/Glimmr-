@@ -200,33 +200,43 @@ const categoryMaterialImageMap = {
   }
 };
 
+// Backend origin for serving uploaded images in production
+const API_BASE_ORIGIN = 'https://glimmr-jewellry-e-commerce-platform-5.onrender.com';
+
+export const normalizeImageUrl = (src) => {
+  if (!src) return src;
+  if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')) return src;
+  // Prefix relative backend paths
+  if (src.startsWith('/api/') || src.startsWith('/uploads/')) {
+    return `${API_BASE_ORIGIN}${src}`;
+  }
+  return src;
+};
+
+export const getProductImages = (product) => {
+  // Prefer uploaded images if present
+  if (product?.images && Array.isArray(product.images) && product.images.length > 0) {
+    return product.images
+      .filter(Boolean)
+      .map(normalizeImageUrl);
+  }
+  // Fallback set based on category/material
+  const category = product?.category?.toLowerCase() || 'rings';
+  const material = product?.material?.toLowerCase() || 'gold';
+  const categoryImages = categoryMaterialImageMap[category] || categoryMaterialImageMap['rings'];
+  const materialImages = categoryImages[material] || categoryImages['gold'];
+  return materialImages.map(normalizeImageUrl);
+};
+
 /**
  * Get the appropriate product image based on category and material
  * @param {Object} product - Product object with category, material, and images
  * @returns {string} - Image URL matching the product's category and material
  */
 export const getProductImage = (product) => {
-  // If product has a custom uploaded image (not a data URI placeholder), use it
-  if (product?.images && product.images.length > 0) {
-    const firstImage = product.images[0];
-    // Only return custom image if it's not the placeholder "No Image" SVG
-    if (firstImage && !firstImage.startsWith('data:image/svg+xml')) {
-      return firstImage;
-    }
-  }
-
-  // Otherwise, get image based on category and material
-  const category = product?.category?.toLowerCase() || 'rings';
-  const material = product?.material?.toLowerCase() || 'gold';
-
-  // Get category images (fallback to rings if category not found)
-  const categoryImages = categoryMaterialImageMap[category] || categoryMaterialImageMap['rings'];
-  
-  // Get material images (fallback to gold if material not found)
-  const materialImages = categoryImages[material] || categoryImages['gold'];
-  
-  // Return first image from the array
-  return materialImages[0];
+  const imgs = getProductImages(product);
+  if (imgs && imgs.length > 0) return imgs[0];
+  return normalizeImageUrl(getDefaultImage());
 };
 
 /**
@@ -236,23 +246,9 @@ export const getProductImage = (product) => {
  * @returns {string} - Random image URL matching the product's category and material
  */
 export const getRandomProductImage = (product) => {
-  // If product has a custom uploaded image, use it
-  if (product?.images && product.images.length > 0) {
-    const firstImage = product.images[0];
-    if (firstImage && !firstImage.startsWith('data:image/svg+xml')) {
-      return firstImage;
-    }
-  }
-
-  // Get image based on category and material
-  const category = product?.category?.toLowerCase() || 'rings';
-  const material = product?.material?.toLowerCase() || 'gold';
-
-  const categoryImages = categoryMaterialImageMap[category] || categoryMaterialImageMap['rings'];
-  const materialImages = categoryImages[material] || categoryImages['gold'];
-  
-  // Return random image from the array
-  return materialImages[Math.floor(Math.random() * materialImages.length)];
+  const imgs = getProductImages(product);
+  if (!imgs || imgs.length === 0) return normalizeImageUrl(getDefaultImage());
+  return imgs[Math.floor(Math.random() * imgs.length)];
 };
 
 /**

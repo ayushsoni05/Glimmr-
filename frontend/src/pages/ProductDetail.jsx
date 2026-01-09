@@ -5,7 +5,7 @@ import { useCart } from '../contexts/CartContext';
 import { useToast } from '../contexts/ToastContext';
 import { HeartIcon } from '../components/Icons';
 import api from '../api';
-import { getProductImage } from '../utils/productImages';
+import { getProductImage, getProductImages } from '../utils/productImages';
 
 const ProductDetail = () => {
   const { id } = useParams();
@@ -16,6 +16,7 @@ const ProductDetail = () => {
   const [product, setProduct] = useState(null);
   const [wishlist, setWishlist] = useState(JSON.parse(localStorage.getItem('wishlist')) || []);
   const [perGramRates, setPerGramRates] = useState({ gold: 6500, silver: 80 });
+  const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
     api.get(`/products/${id}`).then(res => setProduct(res.data));
@@ -28,6 +29,10 @@ const ProductDetail = () => {
       })
       .catch(() => {});
   }, [id]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [product?.id, product?._id]);
 
   const addToCart = async () => {
     if (!user) {
@@ -59,6 +64,10 @@ const ProductDetail = () => {
   };
 
   if (!product) return <div className="container mx-auto p-4">Loading...</div>;
+
+  const images = getProductImages(product);
+  const prevImage = () => setActiveIndex((i) => (i - 1 + images.length) % images.length);
+  const nextImage = () => setActiveIndex((i) => (i + 1) % images.length);
 
   const isDiamondProduct = ((product.material || '').toLowerCase() === 'diamond') || product.diamond?.hasDiamond;
 
@@ -116,7 +125,48 @@ const ProductDetail = () => {
   return (
     <div className="container mx-auto p-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <img src={getProductImage(product)} alt={product.name} className="w-full h-96 object-cover rounded-lg shadow-lg" />
+        <div className="w-full">
+          <div className="relative w-full h-96 bg-slate-100 rounded-lg overflow-hidden shadow-lg">
+            <img
+              src={images[activeIndex] || getProductImage(product)}
+              alt={product.name}
+              className="w-full h-full object-cover"
+            />
+            {images.length > 1 && (
+              <>
+                <button
+                  aria-label="Previous image"
+                  onClick={prevImage}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-slate-800 rounded-full w-10 h-10 flex items-center justify-center shadow"
+                >
+                  ‹
+                </button>
+                <button
+                  aria-label="Next image"
+                  onClick={nextImage}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-slate-800 rounded-full w-10 h-10 flex items-center justify-center shadow"
+                >
+                  ›
+                </button>
+              </>
+            )}
+          </div>
+          {images.length > 1 && (
+            <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
+              {images.map((img, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setActiveIndex(idx)}
+                  className={`flex-shrink-0 w-20 h-20 rounded border-2 transition ${
+                    idx === activeIndex ? 'border-primary' : 'border-gray-300'
+                  }`}
+                >
+                  <img src={img} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="flex flex-col justify-center">
           <h1 className="text-4xl font-bold text-primary mb-2">{product.name}</h1>
           <p className="text-lg text-textPrimary mb-6">{product.description}</p>
