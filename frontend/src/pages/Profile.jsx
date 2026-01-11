@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { useToast } from '../contexts/ToastContext';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { normalizeImageUrl } from '../utils/productImages';
 import {
   DiamondIcon,
   ShoppingBagIcon,
@@ -352,7 +353,7 @@ const Profile = () => {
               <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-amber-400/50 flex-shrink-0 bg-gradient-to-br from-amber-100 to-stone-100 flex items-center justify-center shadow-lg">
                 {profilePhoto || profilePhotoPreview ? (
                   <img 
-                    src={profilePhotoPreview || profilePhoto} 
+                    src={profilePhotoPreview || normalizeImageUrl(profilePhoto)} 
                     alt="Profile" 
                     className="w-full h-full object-cover"
                   />
@@ -519,7 +520,7 @@ const Profile = () => {
                         <div className="flex items-center gap-4">
                           <div className="w-24 h-24 rounded-2xl overflow-hidden border-2 border-amber-300/50 bg-gradient-to-br from-amber-100 to-stone-50 flex-shrink-0 shadow-md">
                             <img 
-                              src={profilePhotoPreview || profilePhoto} 
+                              src={profilePhotoPreview || normalizeImageUrl(profilePhoto)} 
                               alt="Profile Preview" 
                               className="w-full h-full object-cover"
                             />
