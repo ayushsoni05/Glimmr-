@@ -62,16 +62,25 @@ function createMailTransport() {
       port,
       secure,
       auth: { user, pass },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
+      connectionTimeout: 30000,  // Increased to 30 seconds
+      greetingTimeout: 30000,     // Increased to 30 seconds
+      socketTimeout: 45000,       // Socket timeout
+      pool: true,                 // Use connection pooling
+      maxConnections: 5,          // Max concurrent connections
+      maxMessages: 100,           // Max messages per connection
+      rateDelta: 1000,            // Delay between messages
+      rateLimit: 5,               // Max messages per rateDelta
+      logger: false,              // Disable nodemailer logger
+      debug: false                // Disable debug output
     });
 
     // Log verification result at startup to surface SMTP connectivity issues
     transport.verify((err) => {
       if (err) {
         console.error('[SMTP] Transport verify failed:', err && err.message ? err.message : err);
+        console.error('[SMTP] Config:', { host, port, secure, user: user.substring(0, 3) + '***' });
       } else {
-        console.log('[SMTP] Transport verified:', { host, port, secure });
+        console.log('[SMTP] ✅ Transport verified and ready:', { host, port, secure, user: user.substring(0, 3) + '***' });
       }
     });
 
@@ -242,26 +251,33 @@ async function sendOtpEmail(email, otp, context) {
   }
 
   if (!otpResendClient) {
-    console.error('[OTP_EMAIL] Resend client not configured. Set RESEND_API_KEY.');
-    console.error('[OTP_EMAIL] Falling back to SMTP...');
+    console.log('[OTP_EMAIL] Resend client not configured. Using SMTP only.');
     // Fall back to SMTP if Resend is not available
     if (mailTransport && mailTransport.sendMail) {
+      const isRealTransport = mailTransport.options && mailTransport.options.host;
+      
+      if (!isRealTransport) {
+        console.error('[OTP_EMAIL] ❌ SMTP not configured (jsonTransport mode)');
+        throw new Error('Email service unavailable: No email provider configured');
+      }
+      
       try {
+        console.log('[OTP_EMAIL] Sending via SMTP...');
         const result = await mailTransport.sendMail({
-          from,
+          from: process.env.SMTP_USER || from,  // Use SMTP user as sender
           to: email,
           subject,
           html,
           text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
         });
-        console.log('[OTP_EMAIL] ✅ Email sent via SMTP fallback');
+        console.log('[OTP_EMAIL] ✅ Email sent via SMTP! MessageID:', result.messageId);
         return result;
       } catch (smtpError) {
-        console.error('[OTP_EMAIL] ❌ SMTP fallback also failed:', smtpError.message);
-        throw new Error('Email service unavailable (both Resend and SMTP failed)');
+        console.error('[OTP_EMAIL] ❌ SMTP failed:', smtpError.message);
+        throw new Error(`Email service unavailable: ${smtpError.message}`);
       }
     }
-    throw new Error('Email service unavailable');
+    throw new Error('Email service unavailable: No email provider configured');
   }
 
   try {
@@ -292,22 +308,34 @@ async function sendOtpEmail(email, otp, context) {
   } catch (error) {
     console.error('[OTP_EMAIL] ❌ Resend send failed:', error && error.message ? error.message : error);
     console.error('[OTP_EMAIL] Full error:', JSON.stringify(error, null, 2));
-    console.error('[OTP_EMAIL] Attempting SMTP fallback...');
+    console.log('[OTP_EMAIL] 🔄 Attempting SMTP fallback...');
+    
     // Try SMTP fallback
     if (mailTransport && mailTransport.sendMail) {
+      // Check if it's a real transport (not jsonTransport)
+      const isRealTransport = mailTransport.options && mailTransport.options.host;
+      
+      if (!isRealTransport) {
+        console.error('[OTP_EMAIL] ❌ SMTP not configured (jsonTransport mode)');
+        throw new Error('Email service unavailable: Resend failed and SMTP not configured');
+      }
+      
       try {
+        console.log('[OTP_EMAIL] Sending via SMTP...');
         const result = await mailTransport.sendMail({
-          from,
+          from: process.env.SMTP_USER || from,  // Use SMTP user as sender
           to: email,
           subject,
           html,
           text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
         });
-        console.log('[OTP_EMAIL] ✅ Email sent via SMTP fallback after Resend failed');
+        console.log('[OTP_EMAIL] ✅ Email sent via SMTP fallback! MessageID:', result.messageId);
         return result;
       } catch (smtpError) {
-        console.error('[OTP_EMAIL] ❌ SMTP fallback also failed:', smtpError.message);
-        throw new Error(`Failed to send OTP email: ${error.message}`);
+        console.error('[OTP_EMAIL] ❌ SMTP fallback failed:', smtpError.message);
+        console.error('[OTP_EMAIL] SMTP Error code:', smtpError.code);
+        console.error('[OTP_EMAIL] SMTP Error response:', smtpError.response);
+        throw new Error(`Email service unavailable: ${smtpError.message}`);
       }
     }
     throw error;
