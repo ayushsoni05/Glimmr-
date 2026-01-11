@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 const Header = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [openCategory, setOpenCategory] = useState(null); // Track which category dropdown is open
   const [isScrolled, setIsScrolled] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -491,164 +492,214 @@ const Header = () => {
 
         {/* Mobile Menu */}
         {isMobileMenuOpen && (
-          <div className="md:hidden mt-4 pb-4 border-t border-accent">
-            <div className="flex flex-col space-y-1">
-              <Link to="/products?category=all" className="py-3 px-2 hover:text-primary hover:bg-accent/50 rounded transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
+          <div className="md:hidden mt-4 pb-4 border-t border-accent max-h-[calc(100vh-80px)] overflow-y-auto">
+            <div className="flex flex-col space-y-0">
+              <Link to="/products?category=all" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
                 <img 
                   src="https://cdn-icons-png.freepik.com/512/1106/1106724.png?uid=R162432181" 
                   alt="All Jewellery"
-                  className="w-7 h-7 object-contain flex-shrink-0" 
-                  style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                  className="w-6 h-6 object-contain flex-shrink-0" 
                 />
                 All Jewellery
               </Link>
-              <div className="py-2">
-                <div className="flex items-center gap-3 px-2">
+              
+              {/* Gold Dropdown */}
+              <div className="border-t border-accent/20">
+                <button 
+                  onClick={() => setOpenCategory(openCategory === 'gold' ? null : 'gold')}
+                  className="w-full py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <img 
+                      src="https://cdn-icons-png.freepik.com/512/13026/13026424.png?uid=R162432181" 
+                      alt="Gold"
+                      className="w-6 h-6 object-contain flex-shrink-0" 
+                      style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                    />
+                    <span className="font-medium">Gold</span>
+                  </span>
+                  <svg className={`w-5 h-5 transition-transform ${openCategory === 'gold' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                </button>
+                {openCategory === 'gold' && (
+                  <div className="bg-accent/10 pl-4">
+                    {goldSubcategories.map((item) => (
+                      <Link
+                        key={item.name}
+                        to={`/category/gold/${item.slug}`}
+                        className="flex items-center gap-3 py-2 px-4 text-sm hover:text-primary hover:bg-accent/30 transition-colors"
+                        onClick={() => { setIsMobileMenuOpen(false); setOpenCategory(null); }}
+                      >
+                        {item.image ? (
+                          <img
+                            src={item.image}
+                            alt={item.name}
+                            className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+                          />
+                        ) : (
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-50 text-amber-700 text-xs flex-shrink-0">
+                            {item.icon}
+                          </span>
+                        )}
+                        {item.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Silver Dropdown */}
+              <div className="border-t border-accent/20">
+                <button 
+                  onClick={() => setOpenCategory(openCategory === 'silver' ? null : 'silver')}
+                  className="w-full py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <img 
+                      src="https://cdn-icons-png.freepik.com/512/5789/5789394.png" 
+                      alt="Silver"
+                      className="w-6 h-6 object-contain flex-shrink-0" 
+                      style={{ filter: 'brightness(1.1) contrast(1.1)' }}
+                    />
+                    <span className="font-medium">Silver</span>
+                  </span>
+                  <svg className={`w-5 h-5 transition-transform ${openCategory === 'silver' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                </button>
+                {openCategory === 'silver' && (
+                  <div className="bg-accent/10 pl-4">
+                    {silverSubcategories.map((item) => (
+                      <Link
+                        key={item.name}
+                        to={`/category/silver/${item.slug}`}
+                        className="flex items-center gap-3 py-2 px-4 text-sm hover:text-primary hover:bg-accent/30 transition-colors"
+                        onClick={() => { setIsMobileMenuOpen(false); setOpenCategory(null); }}
+                      >
+                        {item.image ? (
+                          <img
+                            src={item.image}
+                            alt={item.name}
+                            className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+                          />
+                        ) : (
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-50 text-slate-700 text-xs flex-shrink-0">
+                            {item.icon}
+                          </span>
+                        )}
+                        {item.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Diamond Dropdown */}
+              <div className="border-t border-accent/20">
+                <button 
+                  onClick={() => setOpenCategory(openCategory === 'diamond' ? null : 'diamond')}
+                  className="w-full py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <img 
+                      src="https://cdn-icons-png.freepik.com/512/9468/9468167.png?uid=R162432181" 
+                      alt="Diamond"
+                      className="w-6 h-6 object-contain flex-shrink-0" 
+                      style={{ filter: 'brightness(1.2) contrast(1.1)' }}
+                    />
+                    <span className="font-medium">Diamond</span>
+                  </span>
+                  <svg className={`w-5 h-5 transition-transform ${openCategory === 'diamond' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                </button>
+                {openCategory === 'diamond' && (
+                  <div className="bg-accent/10 pl-4">
+                    {diamondSubcategories.map((item) => (
+                      <Link
+                        key={item.name}
+                        to={`/category/diamond/${item.slug}`}
+                        className="flex items-center gap-3 py-2 px-4 text-sm hover:text-primary hover:bg-accent/30 transition-colors"
+                        onClick={() => { setIsMobileMenuOpen(false); setOpenCategory(null); }}
+                      >
+                        {item.image ? (
+                          <img
+                            src={item.image}
+                            alt={item.name}
+                            className="h-8 w-8 object-cover rounded-full flex-shrink-0"
+                          />
+                        ) : (
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-50 text-slate-700 text-xs flex-shrink-0">
+                            {item.icon}
+                          </span>
+                        )}
+                        {item.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-accent/20">
+                <Link to="/products?category=earrings" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
                   <img 
-                    src="https://cdn-icons-png.freepik.com/512/13026/13026424.png?uid=R162432181" 
-                    alt="Gold"
-                    className="w-7 h-7 object-contain flex-shrink-0" 
+                    src="https://cdn-icons-png.freepik.com/512/2793/2793481.png?uid=R162432181" 
+                    alt="Earrings"
+                    className="w-6 h-6 object-contain flex-shrink-0" 
                     style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
                   />
-                  <span className="font-medium">Gold</span>
-                </div>
-                <div className="ml-12 mt-2 grid grid-cols-1 gap-2 rounded-lg bg-accent/10 p-2">
-                  {goldSubcategories.map((item) => (
-                    <Link
-                      key={item.name}
-                      to={`/category/gold/${item.slug}`}
-                      className="flex items-center gap-3 py-2 px-3 rounded-md hover:text-primary hover:bg-accent/60 transition-colors"
-                      onClick={() => setIsMobileMenuOpen(false)}
-                    >
-                      {item.image ? (
-                        <img
-                          src={item.image}
-                          alt={item.name}
-                          className="h-12 w-12 rounded-full object-cover shadow-sm border border-amber-100"
-                        />
-                      ) : (
-                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-50 text-amber-700 shadow-sm border border-amber-100 text-lg">
-                          {item.icon}
-                        </span>
-                      )}
-                      <span className="text-sm">{item.name}</span>
-                    </Link>
-                  ))}
-                </div>
+                  Earrings
+                </Link>
               </div>
-              <div className="py-2">
-                <div className="flex items-center gap-3 px-2">
+
+              <div className="border-t border-accent/20">
+                <Link to="/products?category=necklaces" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
                   <img 
-                    src="https://cdn-icons-png.freepik.com/512/5789/5789394.png" 
-                    alt="Silver"
-                    className="w-7 h-7 object-contain flex-shrink-0" 
-                    style={{ filter: 'brightness(1.1) contrast(1.1)' }}
+                    src="https://cdn-icons-png.freepik.com/512/16961/16961825.png" 
+                    alt="Necklaces"
+                    className="w-6 h-6 object-contain flex-shrink-0" 
+                    style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
                   />
-                  <span className="font-medium">Silver</span>
-                </div>
-                <div className="ml-12 mt-2 grid grid-cols-1 gap-2 rounded-lg bg-accent/10 p-2">
-                  {silverSubcategories.map((item) => (
-                    <Link
-                      key={item.name}
-                      to={`/category/silver/${item.slug}`}
-                      className="flex items-center gap-3 py-2 px-3 rounded-md hover:text-primary hover:bg-accent/60 transition-colors"
-                      onClick={() => setIsMobileMenuOpen(false)}
-                    >
-                      {item.image ? (
-                        <img
-                          src={item.image}
-                          alt={item.name}
-                          className="h-12 w-12 rounded-full object-cover shadow-sm border border-slate-100"
-                        />
-                      ) : (
-                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-700 shadow-sm border border-slate-100 text-lg">
-                          {item.icon}
-                        </span>
-                      )}
-                      <span className="text-sm">{item.name}</span>
-                    </Link>
-                  ))}
-                </div>
+                  Necklaces
+                </Link>
               </div>
-              <div className="py-2">
-                <div className="flex items-center gap-3 px-2">
+
+              <div className="border-t border-accent/20">
+                <Link to="/products?category=rings" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
                   <img 
-                    src="https://cdn-icons-png.freepik.com/512/9468/9468167.png?uid=R162432181" 
-                    alt="Diamond"
-                    className="w-7 h-7 object-contain flex-shrink-0" 
-                    style={{ filter: 'brightness(1.2) contrast(1.1)' }}
+                    src="https://cdn-icons-png.freepik.com/512/1940/1940886.png?uid=R162432181" 
+                    alt="Rings"
+                    className="w-6 h-6 object-contain flex-shrink-0" 
+                    style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
                   />
-                  <span className="font-medium">Diamond</span>
-                </div>
-                <div className="ml-12 mt-2 grid grid-cols-1 gap-2 rounded-lg bg-accent/10 p-2">
-                  {diamondSubcategories.map((item) => (
-                    <Link
-                      key={item.name}
-                      to={`/category/diamond/${item.slug}`}
-                      className="flex items-center gap-3 py-2 px-3 rounded-md hover:text-primary hover:bg-accent/60 transition-colors"
-                      onClick={() => setIsMobileMenuOpen(false)}
-                    >
-                      {item.image ? (
-                        <img
-                          src={item.image}
-                          alt={item.name}
-                          className="h-12 w-12 object-cover rounded-full shadow-sm border border-slate-100"
-                        />
-                      ) : (
-                        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-700 shadow-sm border border-slate-100 text-lg">
-                          {item.icon}
-                        </span>
-                      )}
-                      <span className="text-sm">{item.name}</span>
-                    </Link>
-                  ))}
-                </div>
+                  Rings
+                </Link>
               </div>
-              <Link to="/products?category=earrings" className="py-2 hover:text-primary transition-colors flex items-center gap-3">
-                <img 
-                  src="https://cdn-icons-png.freepik.com/512/2793/2793481.png?uid=R162432181" 
-                  alt="Earrings"
-                  className="w-7 h-7 object-contain flex-shrink-0" 
-                  style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                />
-                Earrings
-              </Link>
-              <Link to="/products?category=necklaces" className="py-2 hover:text-primary transition-colors flex items-center gap-3">
-                <img 
-                  src="https://cdn-icons-png.freepik.com/512/16961/16961825.png" 
-                  alt="Necklaces"
-                  className="w-7 h-7 object-contain flex-shrink-0" 
-                  style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                />
-                Necklaces
-              </Link>
-              <Link to="/products?category=rings" className="py-2 hover:text-primary transition-colors flex items-center gap-3">
-                <img 
-                  src="https://cdn-icons-png.freepik.com/512/1940/1940886.png?uid=R162432181" 
-                  alt="Rings"
-                  className="w-7 h-7 object-contain flex-shrink-0" 
-                  style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                />
-                Rings
-              </Link>
-              <Link to="/products?category=wedding" className="py-2 hover:text-primary transition-colors flex items-center gap-3">
-                <img 
-                  src="https://cdn-icons-png.freepik.com/512/12741/12741542.png?uid=R162432181" 
-                  alt="Wedding"
-                  className="w-7 h-7 object-contain flex-shrink-0" 
-                  style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                />
-                Wedding
-              </Link>
-              <Link to="/collections" className="py-2 hover:text-primary transition-colors flex items-center gap-3">
-                <img 
-                  src="https://cdn-icons-png.freepik.com/512/9852/9852348.png?uid=R162432181" 
-                  alt="Collections"
-                  className="w-7 h-7 object-contain flex-shrink-0" 
-                  style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                />
-                Collections
-              </Link>
+
+              <div className="border-t border-accent/20">
+                <Link to="/products?category=wedding" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
+                  <img 
+                    src="https://cdn-icons-png.freepik.com/512/12741/12741542.png?uid=R162432181" 
+                    alt="Wedding"
+                    className="w-6 h-6 object-contain flex-shrink-0" 
+                    style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                  />
+                  Wedding
+                </Link>
+              </div>
+
+              <div className="border-t border-accent/20">
+                <Link to="/collections" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
+                  <img 
+                    src="https://cdn-icons-png.freepik.com/512/9852/9852348.png?uid=R162432181" 
+                    alt="Collections"
+                    className="w-6 h-6 object-contain flex-shrink-0" 
+                    style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                  />
+                  Collections
+                </Link>
+              </div>
             </div>
           </div>
         )}

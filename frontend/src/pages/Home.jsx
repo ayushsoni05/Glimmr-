@@ -330,7 +330,7 @@ const Home = () => {
       </section>
 
       {/* Newsletter */}
-      <section className="py-16 bg-primary text-secondary">
+      <section className="py-12 sm:py-16 bg-primary text-secondary">
         <div className="container mx-auto px-4 text-center">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -338,15 +338,15 @@ const Home = () => {
             viewport={{ once: true }}
             transition={{ duration: 0.4, ease: 'easeOut' }}
           >
-            <h2 className="text-3xl font-bold mb-4 font-heading">Stay in the Loop</h2>
-            <p className="mb-8">Subscribe to our newsletter for exclusive offers, new arrivals, and jewelry tips.</p>
-            <div className="flex justify-center max-w-md mx-auto">
+            <h2 className="text-2xl sm:text-3xl font-bold mb-3 sm:mb-4 font-heading">Stay in the Loop</h2>
+            <p className="mb-6 sm:mb-8 text-sm sm:text-base px-2">Subscribe to our newsletter for exclusive offers, new arrivals, and jewelry tips.</p>
+            <div className="flex flex-col sm:flex-row justify-center gap-2 sm:gap-0 max-w-full sm:max-w-md mx-auto px-2">
               <input
                 type="email"
                 placeholder="Enter your email"
-                className="flex-1 px-4 py-3 rounded-l-lg focus:outline-none text-textPrimary"
+                className="flex-1 min-w-0 px-4 py-3 rounded-lg sm:rounded-l-lg focus:outline-none text-textPrimary text-sm"
               />
-              <button className="bg-hover text-secondary px-6 py-3 rounded-r-lg font-semibold hover:bg-textPrimary transition-colors">
+              <button className="bg-hover text-secondary px-6 py-3 rounded-lg sm:rounded-r-lg font-semibold hover:bg-textPrimary transition-colors w-full sm:w-auto">
                 Subscribe
               </button>
             </div>
