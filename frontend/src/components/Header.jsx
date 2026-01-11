@@ -642,63 +642,215 @@ const Header = () => {
               </div>
 
               <div className="border-t border-accent/20">
-                <Link to="/products?category=earrings" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
-                  <img 
-                    src="https://cdn-icons-png.freepik.com/512/2793/2793481.png?uid=R162432181" 
-                    alt="Earrings"
-                    className="w-6 h-6 object-contain flex-shrink-0" 
-                    style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                  />
-                  Earrings
-                </Link>
+                <button 
+                  onClick={() => setOpenCategory(openCategory === 'earrings' ? null : 'earrings')}
+                  className="w-full py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <img 
+                      src="https://cdn-icons-png.freepik.com/512/2793/2793481.png?uid=R162432181" 
+                      alt="Earrings"
+                      className="w-6 h-6 object-contain flex-shrink-0" 
+                      style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                    />
+                    <span className="font-medium">Earrings</span>
+                  </span>
+                  <svg className={`w-5 h-5 transition-transform ${openCategory === 'earrings' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                </button>
+                {openCategory === 'earrings' && (
+                  <div className="bg-accent/10 pl-4">
+                    {[
+                      { name: 'All Earrings', slug: '', image: 'https://www.candere.com/media/jewellery/images/C022366_1.jpeg' },
+                      { name: 'Studs', slug: 'studs', image: 'https://www.candere.com/media/jewellery/images/C022366_1.jpeg' },
+                      { name: 'Drops', slug: 'drops', image: 'https://media.istockphoto.com/id/1193457834/photo/gold-earrings-isolated.jpg?s=612x612&w=0&k=20&c=pX_yS_13RZ_RVVzM5qn61VpgsV2zyanheF7zWifR1iQ=' },
+                      { name: 'Hoops', slug: 'hoops', image: 'https://as2.ftcdn.net/jpg/06/09/80/01/1000_F_609800123_DNVFeEuUumbHKzx5nMUMRnUc78mtyNkl.jpg' },
+                    ].map((item) => (
+                      <Link
+                        key={item.name}
+                        to={item.slug ? `/products?category=earrings&subcategory=${item.slug}` : '/products?category=earrings'}
+                        className="flex items-center gap-3 py-2 px-4 text-sm hover:text-primary hover:bg-accent/30 transition-colors"
+                        onClick={() => { setIsMobileMenuOpen(false); setOpenCategory(null); }}
+                      >
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+                        />
+                        {item.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="border-t border-accent/20">
-                <Link to="/products?category=necklaces" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
-                  <img 
-                    src="https://cdn-icons-png.freepik.com/512/16961/16961825.png" 
-                    alt="Necklaces"
-                    className="w-6 h-6 object-contain flex-shrink-0" 
-                    style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                  />
-                  Necklaces
-                </Link>
+                <button 
+                  onClick={() => setOpenCategory(openCategory === 'necklaces' ? null : 'necklaces')}
+                  className="w-full py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <img 
+                      src="https://cdn-icons-png.freepik.com/512/16961/16961825.png" 
+                      alt="Necklaces"
+                      className="w-6 h-6 object-contain flex-shrink-0" 
+                      style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                    />
+                    <span className="font-medium">Necklaces</span>
+                  </span>
+                  <svg className={`w-5 h-5 transition-transform ${openCategory === 'necklaces' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                </button>
+                {openCategory === 'necklaces' && (
+                  <div className="bg-accent/10 pl-4">
+                    {[
+                      { name: 'All Necklaces', slug: '', image: 'https://carltonlondon.co.in/cdn/shop/files/fjn4936_4.jpg?v=1756967793&width=1500' },
+                      { name: 'Chains', slug: 'chains', image: 'https://carltonlondon.co.in/cdn/shop/files/fjn4936_4.jpg?v=1756967793&width=1500' },
+                      { name: 'Pendants', slug: 'pendants', image: 'https://www.candere.com/media/jewellery/images/C021994___1.jpeg' },
+                      { name: 'Chokers', slug: 'chokers', image: 'https://aspfashionjewellery.com/cdn/shop/files/gold-forming-choker-with-earrings-white-background.png?v=1764591308&width=3840' },
+                    ].map((item) => (
+                      <Link
+                        key={item.name}
+                        to={item.slug ? `/products?category=necklaces&subcategory=${item.slug}` : '/products?category=necklaces'}
+                        className="flex items-center gap-3 py-2 px-4 text-sm hover:text-primary hover:bg-accent/30 transition-colors"
+                        onClick={() => { setIsMobileMenuOpen(false); setOpenCategory(null); }}
+                      >
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+                        />
+                        {item.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="border-t border-accent/20">
-                <Link to="/products?category=rings" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
-                  <img 
-                    src="https://cdn-icons-png.freepik.com/512/1940/1940886.png?uid=R162432181" 
-                    alt="Rings"
-                    className="w-6 h-6 object-contain flex-shrink-0" 
-                    style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                  />
-                  Rings
-                </Link>
+                <button 
+                  onClick={() => setOpenCategory(openCategory === 'rings' ? null : 'rings')}
+                  className="w-full py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <img 
+                      src="https://cdn-icons-png.freepik.com/512/1940/1940886.png?uid=R162432181" 
+                      alt="Rings"
+                      className="w-6 h-6 object-contain flex-shrink-0" 
+                      style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                    />
+                    <span className="font-medium">Rings</span>
+                  </span>
+                  <svg className={`w-5 h-5 transition-transform ${openCategory === 'rings' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                </button>
+                {openCategory === 'rings' && (
+                  <div className="bg-accent/10 pl-4">
+                    {[
+                      { name: 'All Rings', slug: '', image: 'https://www.siriusjewels.com/uploads/products/copy_1DS-46.74.jpg' },
+                      { name: 'Engagement', slug: 'engagement', image: 'https://www.siriusjewels.com/uploads/products/copy_1DS-46.74.jpg' },
+                      { name: 'Daily Wear', slug: 'daily-wear', image: 'https://kinclimg0.bluestone.com/f_jpg,c_scale,w_828,q_80,b_rgb:f0f0f0/giproduct/BISM0011R02_YAA18DIG6XXXXXXXX_ABCD00-PICS-00001-1024-25698.png' },
+                      { name: 'Couple Rings', slug: 'couple-rings', image: 'https://www.tanishq.co.in/on/demandware.static/-/Sites-Tanishq-product-catalog/default/dw05455b17/images/hi-res/50E4SRFBA2137_1.jpg' },
+                    ].map((item) => (
+                      <Link
+                        key={item.name}
+                        to={item.slug ? `/products?category=rings&subcategory=${item.slug}` : '/products?category=rings'}
+                        className="flex items-center gap-3 py-2 px-4 text-sm hover:text-primary hover:bg-accent/30 transition-colors"
+                        onClick={() => { setIsMobileMenuOpen(false); setOpenCategory(null); }}
+                      >
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+                        />
+                        {item.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="border-t border-accent/20">
-                <Link to="/products?category=wedding" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
-                  <img 
-                    src="https://cdn-icons-png.freepik.com/512/12741/12741542.png?uid=R162432181" 
-                    alt="Wedding"
-                    className="w-6 h-6 object-contain flex-shrink-0" 
-                    style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                  />
-                  Wedding
-                </Link>
+                <button 
+                  onClick={() => setOpenCategory(openCategory === 'wedding' ? null : 'wedding')}
+                  className="w-full py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <img 
+                      src="https://cdn-icons-png.freepik.com/512/12741/12741542.png?uid=R162432181" 
+                      alt="Wedding"
+                      className="w-6 h-6 object-contain flex-shrink-0" 
+                      style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                    />
+                    <span className="font-medium">Wedding</span>
+                  </span>
+                  <svg className={`w-5 h-5 transition-transform ${openCategory === 'wedding' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                </button>
+                {openCategory === 'wedding' && (
+                  <div className="bg-accent/10 pl-4">
+                    {[
+                      { name: 'All Wedding', slug: '', image: 'https://medias.utsavfashion.com/media/catalog/product/cache/1/image/500x/040ec09b1e35df139433887a97daa66f/s/t/stone-studded-bridal-set-v1-jcv146_1.jpg' },
+                      { name: 'Bridal Sets', slug: 'bridal-sets', image: 'https://medias.utsavfashion.com/media/catalog/product/cache/1/image/500x/040ec09b1e35df139433887a97daa66f/s/t/stone-studded-bridal-set-v1-jcv146_1.jpg' },
+                      { name: 'Gift Sets', slug: 'gift-sets', image: 'https://images.laceandfavour.com/_cache/_products/1700x1700/cleo-gold-teardrop-cubic-zirconia-wedding-jewellery-set-4.jpg' },
+                    ].map((item) => (
+                      <Link
+                        key={item.name}
+                        to={item.slug ? `/products?category=wedding&subcategory=${item.slug}` : '/products?category=wedding'}
+                        className="flex items-center gap-3 py-2 px-4 text-sm hover:text-primary hover:bg-accent/30 transition-colors"
+                        onClick={() => { setIsMobileMenuOpen(false); setOpenCategory(null); }}
+                      >
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+                        />
+                        {item.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="border-t border-accent/20">
-                <Link to="/collections" className="py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center gap-3" onClick={() => setIsMobileMenuOpen(false)}>
-                  <img 
-                    src="https://cdn-icons-png.freepik.com/512/9852/9852348.png?uid=R162432181" 
-                    alt="Collections"
-                    className="w-6 h-6 object-contain flex-shrink-0" 
-                    style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
-                  />
-                  Collections
-                </Link>
+                <button 
+                  onClick={() => setOpenCategory(openCategory === 'collections' ? null : 'collections')}
+                  className="w-full py-3 px-4 hover:text-primary hover:bg-accent/50 transition-colors flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <img 
+                      src="https://cdn-icons-png.freepik.com/512/9852/9852348.png?uid=R162432181" 
+                      alt="Collections"
+                      className="w-6 h-6 object-contain flex-shrink-0" 
+                      style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                    />
+                    <span className="font-medium">Collections</span>
+                  </span>
+                  <svg className={`w-5 h-5 transition-transform ${openCategory === 'collections' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                </button>
+                {openCategory === 'collections' && (
+                  <div className="bg-accent/10 pl-4">
+                    <Link
+                      to="/collections"
+                      className="flex items-center gap-3 py-2 px-4 text-sm hover:text-primary hover:bg-accent/30 transition-colors"
+                      onClick={() => { setIsMobileMenuOpen(false); setOpenCategory(null); }}
+                    >
+                      <img
+                        src="https://cdn-icons-png.freepik.com/512/9852/9852348.png?uid=R162432181"
+                        alt="All Collections"
+                        className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+                        style={{ filter: 'brightness(0.8) sepia(0.8) hue-rotate(-30deg) saturate(1.5)' }}
+                      />
+                      All Collections
+                    </Link>
+                  </div>
+                )}
               </div>
             </div>
           </div>
