@@ -763,10 +763,24 @@ router.post('/request-otp-login', async (req, res) => {
       return res.status(400).json({ error: 'Email or phone number is required' });
     }
 
+    console.log('[REQUEST_OTP_LOGIN] Identity resolved:', {
+      channel: identity.channel,
+      field: identity.field,
+      value: identity.value ? identity.value.substring(0, 3) + '***' : 'none'
+    });
+
     const user = await findUserByIdentity(identity);
     if (!user) {
       return res.status(404).json({ error: 'User not found. Please sign up first.' });
     }
+
+    console.log('[REQUEST_OTP_LOGIN] User found:', {
+      id: user._id,
+      email: user.email ? user.email.substring(0, 3) + '***' : 'none',
+      phone: user.phone ? user.phone.substring(0, 3) + '***' : 'none',
+      hasEmail: !!user.email,
+      hasPhone: !!user.phone
+    });
 
     if (user.otpLockedUntil && user.otpLockedUntil > new Date()) {
       const seconds = Math.ceil((user.otpLockedUntil.getTime() - Date.now()) / 1000);
@@ -780,8 +794,12 @@ router.post('/request-otp-login', async (req, res) => {
     }
 
     try {
+      console.log('[REQUEST_OTP_LOGIN] Issuing OTP via channel:', identity.channel);
       await issueOtp(user, 'login', identity.channel);
-      return res.json({ message: `OTP sent to your ${identity.channel}. Enter it to login.` });
+      return res.json({ 
+        message: `OTP sent to your ${identity.channel}. Enter it to login.`,
+        channel: identity.channel 
+      });
     } catch (otpError) {
       console.error('[AUTH] Failed to send OTP:', otpError.message);
       console.error('[AUTH] OTP Error stack:', otpError.stack);
