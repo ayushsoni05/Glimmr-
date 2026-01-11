@@ -63,25 +63,29 @@ function createMailTransport() {
       port,
       secure,
       auth: { user, pass },
-      connectionTimeout: 30000,  // Increased to 30 seconds
-      greetingTimeout: 30000,     // Increased to 30 seconds
-      socketTimeout: 45000,       // Socket timeout
-      pool: true,                 // Use connection pooling
-      maxConnections: 5,          // Max concurrent connections
-      maxMessages: 100,           // Max messages per connection
-      rateDelta: 1000,            // Delay between messages
-      rateLimit: 5,               // Max messages per rateDelta
-      logger: false,              // Disable nodemailer logger
-      debug: false                // Disable debug output
+      connectionTimeout: 20000,  // 20 seconds for connection
+      greetingTimeout: 20000,    // 20 seconds for greeting
+      socketTimeout: 30000,      // 30 seconds for socket
+      pool: false,               // Disable pooling for Resend SMTP (they don't like persistent connections)
+      maxConnections: 1,         // Single connection
+      maxMessages: Infinity,     // No limit on messages
+      rateDelta: 1000,           // Delay between messages
+      rateLimit: 10,             // Max 10 messages per rateDelta
+      logger: true,              // Enable logging
+      debug: true,               // Enable debug
+      tls: {
+        rejectUnauthorized: false // Allow self-signed certificates
+      }
     });
 
     // Log verification result at startup to surface SMTP connectivity issues
     transport.verify((err) => {
       if (err) {
-        console.error('[SMTP] Transport verify failed:', err && err.message ? err.message : err);
+        console.error('[SMTP] ❌ Transport verify failed:', err && err.message ? err.message : err);
         console.error('[SMTP] Config:', { host, port, secure, user: user.substring(0, 3) + '***' });
+        console.error('[SMTP] Troubleshooting: Ensure SMTP_HOST, SMTP_USER, and SMTP_PASS are correct');
       } else {
-        console.log('[SMTP] ✅ Transport verified and ready:', { host, port, secure, user: user.substring(0, 3) + '***' });
+        console.log('[SMTP] ✅ Transport verified successfully:', { host, port, secure, user: user.substring(0, 3) + '***' });
       }
     });
 
@@ -201,7 +205,7 @@ const buildOtpExpiry = () =>
   new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
 async function sendOtpEmail(email, otp, context) {
-  console.log('[OTP_EMAIL] Attempting to send OTP email via Resend...');
+  console.log('[OTP_EMAIL] Attempting to send OTP email...');
   console.log('[OTP_EMAIL] To:', email);
   console.log('[OTP_EMAIL] Context:', context);
   console.log('[OTP_EMAIL] ***** OTP CODE:', otp, '*****'); // Log OTP for development/testing
@@ -243,102 +247,57 @@ async function sendOtpEmail(email, otp, context) {
     </html>
   `;
 
-  // Create Resend client if needed (same as admin endpoint)
-  let otpResendClient = resendClient;
-  if (!otpResendClient && process.env.RESEND_API_KEY) {
-    console.log('[OTP_EMAIL] Creating new Resend client instance...');
-    const { Resend } = require('resend');
-    otpResendClient = new Resend(process.env.RESEND_API_KEY);
+  // For OTP: Skip Resend API entirely (it's in testing mode)
+  // Go directly to SMTP which is configured with Resend SMTP credentials
+  console.log('[OTP_EMAIL] Using SMTP for OTP delivery (Resend API is in testing mode)');
+  
+  if (!mailTransport || !mailTransport.sendMail) {
+    console.error('[OTP_EMAIL] ❌ SMTP not configured');
+    throw new Error('Email service unavailable: SMTP not configured');
   }
 
-  if (!otpResendClient) {
-    console.log('[OTP_EMAIL] Resend client not configured. Using SMTP only.');
-    // Fall back to SMTP if Resend is not available
-    if (mailTransport && mailTransport.sendMail) {
-      const isRealTransport = mailTransport.options && mailTransport.options.host;
-      
-      if (!isRealTransport) {
-        console.error('[OTP_EMAIL] ❌ SMTP not configured (jsonTransport mode)');
-        throw new Error('Email service unavailable: No email provider configured');
-      }
-      
-      try {
-        console.log('[OTP_EMAIL] Sending via SMTP...');
-        const result = await mailTransport.sendMail({
-          from: process.env.SMTP_USER || from,  // Use SMTP user as sender
-          to: email,
-          subject,
-          html,
-          text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
-        });
-        console.log('[OTP_EMAIL] ✅ Email sent via SMTP! MessageID:', result.messageId);
-        return result;
-      } catch (smtpError) {
-        console.error('[OTP_EMAIL] ❌ SMTP failed:', smtpError.message);
-        throw new Error(`Email service unavailable: ${smtpError.message}`);
-      }
-    }
-    throw new Error('Email service unavailable: No email provider configured');
+  const isRealTransport = mailTransport.options && mailTransport.options.host;
+  
+  if (!isRealTransport) {
+    console.error('[OTP_EMAIL] ❌ SMTP not configured (jsonTransport mode)');
+    throw new Error('Email service unavailable: SMTP not properly configured');
   }
 
   try {
-    console.log('[OTP_EMAIL] Sending via Resend with params:', {
-      from,
-      to: email,
-      subject
-    });
+    console.log('[OTP_EMAIL] Sending OTP via SMTP (Resend SMTP)...');
+    console.log('[OTP_EMAIL] SMTP Host:', mailTransport.options.host);
+    console.log('[OTP_EMAIL] SMTP Port:', mailTransport.options.port);
+    console.log('[OTP_EMAIL] SMTP Auth User:', mailTransport.options.auth?.user?.substring(0, 5) + '***');
     
-    const result = await otpResendClient.emails.send({
-      from,
+    const result = await mailTransport.sendMail({
+      from: process.env.SMTP_USER || from,  // Use SMTP user as sender for OTP
       to: email,
       subject,
       html,
       text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
     });
     
-    console.log('[OTP_EMAIL] Resend API response:', JSON.stringify(result));
-    
-    // Check if result has an ID - if not, it's likely an error response
-    if (!result || !result.id) {
-      console.error('[OTP_EMAIL] ⚠️ Resend returned response without ID:', result);
-      throw new Error(`Resend API returned invalid response: ${JSON.stringify(result)}`);
-    }
-    
-    console.log('[OTP_EMAIL] ✅ Email sent via Resend with ID:', result.id);
+    console.log('[OTP_EMAIL] ✅ Email sent via SMTP successfully!');
+    console.log('[OTP_EMAIL] MessageID:', result.messageId);
+    console.log('[OTP_EMAIL] Response:', result.response);
     return result;
-  } catch (error) {
-    console.error('[OTP_EMAIL] ❌ Resend send failed:', error && error.message ? error.message : error);
-    console.log('[OTP_EMAIL] 🔄 Trying SMTP fallback...');
+  } catch (smtpError) {
+    console.error('[OTP_EMAIL] ❌ SMTP send failed!');
+    console.error('[OTP_EMAIL] Error message:', smtpError.message);
+    console.error('[OTP_EMAIL] Error code:', smtpError.code);
+    console.error('[OTP_EMAIL] Error response:', smtpError.response);
+    console.error('[OTP_EMAIL] Error command:', smtpError.command);
     
-    // Try SMTP fallback
-    if (mailTransport && mailTransport.sendMail) {
-      // Check if it's a real transport (not jsonTransport)
-      const isRealTransport = mailTransport.options && mailTransport.options.host;
-      
-      if (!isRealTransport) {
-        console.error('[OTP_EMAIL] ❌ SMTP not configured (jsonTransport mode)');
-        throw new Error('Email service unavailable: Resend failed and SMTP not configured');
-      }
-      
-      try {
-        console.log('[OTP_EMAIL] Sending via SMTP...');
-        const result = await mailTransport.sendMail({
-          from: process.env.SMTP_USER || from,  // Use SMTP user as sender
-          to: email,
-          subject,
-          html,
-          text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
-        });
-        console.log('[OTP_EMAIL] ✅ Email sent via SMTP fallback! MessageID:', result.messageId);
-        return result;
-      } catch (smtpError) {
-        console.error('[OTP_EMAIL] ❌ SMTP fallback failed:', smtpError.message);
-        console.error('[OTP_EMAIL] SMTP Error code:', smtpError.code);
-        console.error('[OTP_EMAIL] SMTP Error response:', smtpError.response);
-        throw new Error(`Email service unavailable: ${smtpError.message}`);
-      }
+    // Provide detailed debugging info
+    if (smtpError.code === 'ETIMEDOUT') {
+      throw new Error('Email service timeout: Unable to connect to SMTP server. Please check SMTP_HOST, SMTP_PORT, and firewall settings.');
+    } else if (smtpError.code === 'ECONNREFUSED') {
+      throw new Error('Email service connection refused: SMTP server not responding. Please verify SMTP credentials.');
+    } else if (smtpError.code === 'EAUTH') {
+      throw new Error('Email authentication failed: Invalid SMTP credentials. Please check SMTP_USER and SMTP_PASS.');
     }
-    throw error;
+    
+    throw new Error(`Failed to send OTP email: ${smtpError.message}`);
   }
 }
 
