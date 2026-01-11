@@ -50,12 +50,11 @@ function auditSmsEvent(event) {
 }
 
 function createMailTransport() {
-  // Try to use Gmail SMTP first (most reliable with Render)
-  // Fall back to Resend SMTP if Gmail not configured
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  // Brevo SMTP is recommended (works on Render, no activation issues)
+  const host = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
   const port = Number(process.env.SMTP_PORT || 587);
   const secure = process.env.SMTP_SECURE === 'true' ? true : false;
-  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL || 'glimmr05@gmail.com';
+  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL;
   const pass = process.env.SMTP_PASS || process.env.SMTP_APP_PASSWORD;
 
   if (user && pass) {
@@ -88,8 +87,8 @@ function createMailTransport() {
           port, 
           secure, 
           user: user.substring(0, 5) + '***',
-          isGmail: host.includes('gmail'),
-          isResend: host.includes('resend')
+          isBrevo: host.includes('brevo') || host.includes('sendinblue'),
+          isGmail: host.includes('gmail')
         });
         console.error('[SMTP] Troubleshooting: Ensure SMTP_HOST, SMTP_USER, and SMTP_PASS are correct');
       } else {
@@ -98,8 +97,8 @@ function createMailTransport() {
           port, 
           secure, 
           user: user.substring(0, 5) + '***',
-          isGmail: host.includes('gmail'),
-          isResend: host.includes('resend')
+          isBrevo: host.includes('brevo') || host.includes('sendinblue'),
+          isGmail: host.includes('gmail')
         });
       }
     });
@@ -108,7 +107,7 @@ function createMailTransport() {
   }
 
   console.warn(
-    'SMTP credentials not configured. Falling back to console email logger. Configure SMTP_HOST, SMTP_USER, and SMTP_PASS env vars for production.'
+    'SMTP credentials not configured. Configure SMTP_HOST, SMTP_USER, and SMTP_PASS env vars for production.'
   );
   return nodemailer.createTransport({ jsonTransport: true });
 }
@@ -263,7 +262,36 @@ async function sendOtpEmail(email, otp, context) {
     </html>
   `;
 
-  // Try Brevo API first (most reliable, no SMTP issues on Render)
+  // Try SMTP first (Brevo SMTP works without API activation)
+  if (mailTransport && mailTransport.sendMail) {
+    const isRealTransport = mailTransport.options && mailTransport.options.host;
+    
+    if (isRealTransport) {
+      try {
+        console.log('[OTP_EMAIL] Sending OTP via SMTP (Brevo SMTP)...');
+        console.log('[OTP_EMAIL] SMTP Host:', mailTransport.options.host);
+        console.log('[OTP_EMAIL] SMTP Port:', mailTransport.options.port);
+        
+        const result = await mailTransport.sendMail({
+          from: process.env.SMTP_USER || `${senderName} <${senderEmail}>`,
+          to: email,
+          subject,
+          html,
+          text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
+        });
+        
+        console.log('[OTP_EMAIL] ✅ Email sent via SMTP successfully!');
+        console.log('[OTP_EMAIL] MessageID:', result.messageId);
+        return result;
+      } catch (smtpError) {
+        console.error('[OTP_EMAIL] ❌ SMTP failed:', smtpError.message);
+        console.error('[OTP_EMAIL] Error code:', smtpError.code);
+        console.log('[OTP_EMAIL] 🔄 Trying Brevo API fallback...');
+      }
+    }
+  }
+
+  // Try Brevo API as fallback (if SMTP fails)
   if (process.env.BREVO_API_KEY) {
     try {
       console.log('[OTP_EMAIL] Attempting to send via Brevo API...');
@@ -291,78 +319,13 @@ async function sendOtpEmail(email, otp, context) {
       console.log('[OTP_EMAIL] Message ID:', response.data.messageId);
       return response.data;
     } catch (brevoError) {
-      console.error('[OTP_EMAIL] ❌ Brevo API failed:', brevoError.message);
+      console.error('[OTP_EMAIL] ❌ Brevo API also failed:', brevoError.message);
       console.error('[OTP_EMAIL] Brevo Error:', brevoError.response?.data || brevoError.message);
-      
-      // Check if it's an account activation issue
-      if (brevoError.response?.status === 403) {
-        const errorMsg = brevoError.response?.data?.message || '';
-        if (errorMsg.includes('not yet activated')) {
-          console.error('[OTP_EMAIL] ⚠️ Brevo account not yet activated. Please activate at https://app.brevo.com');
-          // Try SMTP fallback instead
-          console.log('[OTP_EMAIL] 🔄 Trying SMTP fallback...');
-        }
-      }
-      
-      // Don't throw yet - try SMTP fallback
-      if (mailTransport && mailTransport.sendMail) {
-        console.log('[OTP_EMAIL] Attempting SMTP fallback after Brevo failure...');
-        const isRealTransport = mailTransport.options && mailTransport.options.host;
-        
-        if (isRealTransport) {
-          try {
-            const result = await mailTransport.sendMail({
-              from: process.env.SMTP_USER || `${senderName} <${senderEmail}>`,
-              to: email,
-              subject,
-              html,
-              text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
-            });
-            
-            console.log('[OTP_EMAIL] ✅ Email sent via SMTP fallback!');
-            return result;
-          } catch (smtpError) {
-            console.error('[OTP_EMAIL] ❌ SMTP fallback also failed:', smtpError.message);
-          }
-        }
-      }
-      
-      throw new Error(`Failed to send OTP email via Brevo: ${brevoError.message}`);
+      throw new Error(`Failed to send OTP email: ${brevoError.message}`);
     }
   }
 
-  // Fall back to SMTP if Brevo not configured
-  console.log('[OTP_EMAIL] Brevo API not configured, falling back to SMTP...');
-  
-  if (!mailTransport || !mailTransport.sendMail) {
-    throw new Error('Email service unavailable: Brevo API key and SMTP both not configured');
-  }
-
-  const isRealTransport = mailTransport.options && mailTransport.options.host;
-  
-  if (!isRealTransport) {
-    throw new Error('Email service unavailable: SMTP not properly configured');
-  }
-
-  try {
-    console.log('[OTP_EMAIL] Sending OTP via SMTP fallback...');
-    
-    const result = await mailTransport.sendMail({
-      from: process.env.SMTP_USER || `${senderName} <${senderEmail}>`,
-      to: email,
-      subject,
-      html,
-      text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
-    });
-    
-    console.log('[OTP_EMAIL] ✅ Email sent via SMTP successfully!');
-    console.log('[OTP_EMAIL] MessageID:', result.messageId);
-    return result;
-  } catch (smtpError) {
-    console.error('[OTP_EMAIL] ❌ SMTP fallback failed!');
-    console.error('[OTP_EMAIL] Error:', smtpError.message);
-    throw new Error(`Email service unavailable: ${smtpError.message}`);
-  }
+  throw new Error('Email service unavailable: No SMTP or API configured');
 }
 
 async function sendOtpSms(phone, otp, context) {
