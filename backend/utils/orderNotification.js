@@ -36,7 +36,7 @@ const mailTransport = createMailTransport();
 
 // Helper function to send email via Resend or fallback to SMTP
 async function sendEmail({ to, subject, html }) {
-  const from = process.env.RESEND_FROM || 'onboarding@resend.dev';
+  const from = process.env.RESEND_FROM || 'Glimmr <onboarding@resend.dev>';
   
   console.log('[ORDER_EMAIL] Attempting to send...');
   console.log('[ORDER_EMAIL] To:', to);

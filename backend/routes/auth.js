@@ -197,7 +197,7 @@ async function sendOtpEmail(email, otp, context) {
   console.log('[OTP_EMAIL] ***** OTP CODE:', otp, '*****'); // Log OTP for development/testing
 
   const subject = `Your ${context} OTP - Glimmr`;
-  const from = process.env.RESEND_FROM || process.env.MAIL_FROM || 'onboarding@resend.dev';
+  const from = process.env.RESEND_FROM || process.env.MAIL_FROM || 'Glimmr <onboarding@resend.dev>';
 
   const html = `
     <!DOCTYPE html>
@@ -585,7 +585,7 @@ router.post('/login', authLimiter, async (req, res) => {
             
             if (resendClient) {
               await resendClient.emails.send({
-                from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+                from: process.env.RESEND_FROM || 'Glimmr <onboarding@resend.dev>',
                 to: user.email,
                 subject: '🔐 Admin 2FA Verification Code',
                 html: htmlContent
@@ -1235,7 +1235,7 @@ router.post('/admin-login', authLimiter, async (req, res) => {
         
         if (resendClient) {
           await resendClient.emails.send({
-            from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+            from: process.env.RESEND_FROM || 'Glimmr <onboarding@resend.dev>',
             to: user.email,
             subject: '🔐 Admin 2FA Verification Code',
             html: htmlContent

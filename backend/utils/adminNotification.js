@@ -39,7 +39,7 @@ mailTransport = createMailTransport();
 
 // Initialize Resend client if configured
 const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const FROM_EMAIL = process.env.RESEND_FROM || 'onboarding@resend.dev';
+const FROM_EMAIL = process.env.RESEND_FROM || 'Glimmr <onboarding@resend.dev>';
 
 console.log('[MAIL] Resend client initialized:', !!resendClient);
 console.log('[MAIL] FROM_EMAIL configured:', FROM_EMAIL);
