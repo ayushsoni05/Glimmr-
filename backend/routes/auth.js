@@ -265,6 +265,12 @@ async function sendOtpEmail(email, otp, context) {
   }
 
   try {
+    console.log('[OTP_EMAIL] Sending via Resend with params:', {
+      from,
+      to: email,
+      subject
+    });
+    
     const result = await otpResendClient.emails.send({
       from,
       to: email,
@@ -272,10 +278,20 @@ async function sendOtpEmail(email, otp, context) {
       html,
       text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
     });
-    console.log('[OTP_EMAIL] ✅ Email sent via Resend:', result && result.id ? result.id : 'no-id');
+    
+    console.log('[OTP_EMAIL] Resend API response:', JSON.stringify(result));
+    
+    // Check if result has an ID - if not, it's likely an error response
+    if (!result || !result.id) {
+      console.error('[OTP_EMAIL] ⚠️ Resend returned response without ID:', result);
+      throw new Error(`Resend API returned invalid response: ${JSON.stringify(result)}`);
+    }
+    
+    console.log('[OTP_EMAIL] ✅ Email sent via Resend with ID:', result.id);
     return result;
   } catch (error) {
     console.error('[OTP_EMAIL] ❌ Resend send failed:', error && error.message ? error.message : error);
+    console.error('[OTP_EMAIL] Full error:', JSON.stringify(error, null, 2));
     console.error('[OTP_EMAIL] Attempting SMTP fallback...');
     // Try SMTP fallback
     if (mailTransport && mailTransport.sendMail) {
