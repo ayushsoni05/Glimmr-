@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
+const axios = require('axios');
 // Twilio removed: prefer Firebase client-side phone auth
 const crypto = require('crypto');
 const admin = require('firebase-admin');
@@ -49,13 +50,13 @@ function auditSmsEvent(event) {
 }
 
 function createMailTransport() {
-  // Support Resend SMTP (preferred for this project)
-  // Also support generic SMTP (Gmail, etc.)
-  const host = process.env.SMTP_HOST || 'smtp.resend.com';
+  // Try to use Gmail SMTP first (most reliable with Render)
+  // Fall back to Resend SMTP if Gmail not configured
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
   const port = Number(process.env.SMTP_PORT || 587);
   const secure = process.env.SMTP_SECURE === 'true' ? true : false;
-  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL || 'resend';
-  const pass = process.env.SMTP_PASS || process.env.SMTP_APP_PASSWORD || process.env.RESEND_API_KEY;
+  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL || 'glimmr05@gmail.com';
+  const pass = process.env.SMTP_PASS || process.env.SMTP_APP_PASSWORD;
 
   if (user && pass) {
     const transport = nodemailer.createTransport({
@@ -63,29 +64,43 @@ function createMailTransport() {
       port,
       secure,
       auth: { user, pass },
-      connectionTimeout: 20000,  // 20 seconds for connection
-      greetingTimeout: 20000,    // 20 seconds for greeting
-      socketTimeout: 30000,      // 30 seconds for socket
-      pool: false,               // Disable pooling for Resend SMTP (they don't like persistent connections)
-      maxConnections: 1,         // Single connection
-      maxMessages: Infinity,     // No limit on messages
-      rateDelta: 1000,           // Delay between messages
-      rateLimit: 10,             // Max 10 messages per rateDelta
-      logger: true,              // Enable logging
-      debug: true,               // Enable debug
+      connectionTimeout: 20000,
+      greetingTimeout: 20000,
+      socketTimeout: 30000,
+      pool: false,
+      maxConnections: 1,
+      maxMessages: Infinity,
+      rateDelta: 1000,
+      rateLimit: 10,
+      logger: true,
+      debug: true,
       tls: {
-        rejectUnauthorized: false // Allow self-signed certificates
+        rejectUnauthorized: false
       }
     });
 
-    // Log verification result at startup to surface SMTP connectivity issues
+    // Log verification result at startup
     transport.verify((err) => {
       if (err) {
         console.error('[SMTP] ❌ Transport verify failed:', err && err.message ? err.message : err);
-        console.error('[SMTP] Config:', { host, port, secure, user: user.substring(0, 3) + '***' });
+        console.error('[SMTP] Config:', { 
+          host, 
+          port, 
+          secure, 
+          user: user.substring(0, 5) + '***',
+          isGmail: host.includes('gmail'),
+          isResend: host.includes('resend')
+        });
         console.error('[SMTP] Troubleshooting: Ensure SMTP_HOST, SMTP_USER, and SMTP_PASS are correct');
       } else {
-        console.log('[SMTP] ✅ Transport verified successfully:', { host, port, secure, user: user.substring(0, 3) + '***' });
+        console.log('[SMTP] ✅ Transport verified successfully:', { 
+          host, 
+          port, 
+          secure, 
+          user: user.substring(0, 5) + '***',
+          isGmail: host.includes('gmail'),
+          isResend: host.includes('resend')
+        });
       }
     });
 
@@ -93,7 +108,7 @@ function createMailTransport() {
   }
 
   console.warn(
-    'SMTP credentials not configured. Falling back to console email logger. Configure SMTP_* or RESEND_API_KEY env vars for production.'
+    'SMTP credentials not configured. Falling back to console email logger. Configure SMTP_HOST, SMTP_USER, and SMTP_PASS env vars for production.'
   );
   return nodemailer.createTransport({ jsonTransport: true });
 }
@@ -211,7 +226,8 @@ async function sendOtpEmail(email, otp, context) {
   console.log('[OTP_EMAIL] ***** OTP CODE:', otp, '*****'); // Log OTP for development/testing
 
   const subject = `Your ${context} OTP - Glimmr`;
-  const from = process.env.RESEND_FROM || process.env.MAIL_FROM || 'Glimmr <noreply@resend.dev>';
+  const senderEmail = process.env.BREVO_FROM_EMAIL || 'noreply@glimmr.com';
+  const senderName = 'Glimmr Jewelry';
 
   const html = `
     <!DOCTYPE html>
@@ -247,30 +263,58 @@ async function sendOtpEmail(email, otp, context) {
     </html>
   `;
 
-  // For OTP: Skip Resend API entirely (it's in testing mode)
-  // Go directly to SMTP which is configured with Resend SMTP credentials
-  console.log('[OTP_EMAIL] Using SMTP for OTP delivery (Resend API is in testing mode)');
+  // Try Brevo API first (most reliable, no SMTP issues on Render)
+  if (process.env.BREVO_API_KEY) {
+    try {
+      console.log('[OTP_EMAIL] Attempting to send via Brevo API...');
+      
+      const response = await axios.post(
+        'https://api.brevo.com/v3/smtp/email',
+        {
+          to: [{ email, name: 'User' }],
+          sender: { email: senderEmail, name: senderName },
+          subject,
+          htmlContent: html,
+          textContent: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
+        },
+        {
+          headers: {
+            'accept': 'application/json',
+            'api-key': process.env.BREVO_API_KEY,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+        }
+      );
+
+      console.log('[OTP_EMAIL] ✅ Email sent via Brevo API successfully!');
+      console.log('[OTP_EMAIL] Message ID:', response.data.messageId);
+      return response.data;
+    } catch (brevoError) {
+      console.error('[OTP_EMAIL] ❌ Brevo API failed:', brevoError.message);
+      console.error('[OTP_EMAIL] Brevo Error:', brevoError.response?.data || brevoError.message);
+      throw new Error(`Failed to send OTP email via Brevo: ${brevoError.message}`);
+    }
+  }
+
+  // Fall back to SMTP if Brevo not configured
+  console.log('[OTP_EMAIL] Brevo API not configured, falling back to SMTP...');
   
   if (!mailTransport || !mailTransport.sendMail) {
-    console.error('[OTP_EMAIL] ❌ SMTP not configured');
-    throw new Error('Email service unavailable: SMTP not configured');
+    throw new Error('Email service unavailable: Brevo API key and SMTP both not configured');
   }
 
   const isRealTransport = mailTransport.options && mailTransport.options.host;
   
   if (!isRealTransport) {
-    console.error('[OTP_EMAIL] ❌ SMTP not configured (jsonTransport mode)');
     throw new Error('Email service unavailable: SMTP not properly configured');
   }
 
   try {
-    console.log('[OTP_EMAIL] Sending OTP via SMTP (Resend SMTP)...');
-    console.log('[OTP_EMAIL] SMTP Host:', mailTransport.options.host);
-    console.log('[OTP_EMAIL] SMTP Port:', mailTransport.options.port);
-    console.log('[OTP_EMAIL] SMTP Auth User:', mailTransport.options.auth?.user?.substring(0, 5) + '***');
+    console.log('[OTP_EMAIL] Sending OTP via SMTP fallback...');
     
     const result = await mailTransport.sendMail({
-      from: process.env.SMTP_USER || from,  // Use SMTP user as sender for OTP
+      from: process.env.SMTP_USER || `${senderName} <${senderEmail}>`,
       to: email,
       subject,
       html,
@@ -279,25 +323,11 @@ async function sendOtpEmail(email, otp, context) {
     
     console.log('[OTP_EMAIL] ✅ Email sent via SMTP successfully!');
     console.log('[OTP_EMAIL] MessageID:', result.messageId);
-    console.log('[OTP_EMAIL] Response:', result.response);
     return result;
   } catch (smtpError) {
-    console.error('[OTP_EMAIL] ❌ SMTP send failed!');
-    console.error('[OTP_EMAIL] Error message:', smtpError.message);
-    console.error('[OTP_EMAIL] Error code:', smtpError.code);
-    console.error('[OTP_EMAIL] Error response:', smtpError.response);
-    console.error('[OTP_EMAIL] Error command:', smtpError.command);
-    
-    // Provide detailed debugging info
-    if (smtpError.code === 'ETIMEDOUT') {
-      throw new Error('Email service timeout: Unable to connect to SMTP server. Please check SMTP_HOST, SMTP_PORT, and firewall settings.');
-    } else if (smtpError.code === 'ECONNREFUSED') {
-      throw new Error('Email service connection refused: SMTP server not responding. Please verify SMTP credentials.');
-    } else if (smtpError.code === 'EAUTH') {
-      throw new Error('Email authentication failed: Invalid SMTP credentials. Please check SMTP_USER and SMTP_PASS.');
-    }
-    
-    throw new Error(`Failed to send OTP email: ${smtpError.message}`);
+    console.error('[OTP_EMAIL] ❌ SMTP fallback failed!');
+    console.error('[OTP_EMAIL] Error:', smtpError.message);
+    throw new Error(`Email service unavailable: ${smtpError.message}`);
   }
 }
 
