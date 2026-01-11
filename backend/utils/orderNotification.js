@@ -1,75 +1,88 @@
 const nodemailer = require('nodemailer');
-const { Resend } = require('resend');
+const axios = require('axios');
 const Order = require('../models/Order');
 const User = require('../models/User');
 
-// Initialize Resend client
-const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-console.log('[ORDER_MAIL] Resend client initialized:', !!resendClient);
-console.log('[ORDER_MAIL] RESEND_API_KEY present:', !!process.env.RESEND_API_KEY);
-console.log('[ORDER_MAIL] RESEND_FROM:', process.env.RESEND_FROM);
+// Log Brevo configuration
+console.log('[ORDER_MAIL] BREVO_API_KEY present:', !!process.env.BREVO_API_KEY);
+console.log('[ORDER_MAIL] BREVO_FROM_EMAIL:', process.env.BREVO_FROM_EMAIL);
 
 function createMailTransport() {
-  if (
-    process.env.SMTP_HOST &&
-    process.env.SMTP_PORT &&
-    process.env.SMTP_USER &&
-    process.env.SMTP_PASS
-  ) {
+  const host = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL;
+  const pass = process.env.SMTP_PASS;
+
+  if (user && pass) {
+    const isBrevo = host.includes('brevo');
+    console.log('[ORDER_MAIL] Using SMTP host:', host, 'port:', port, 'user:', user ? 'set' : 'missing');
+    console.log('[ORDER_MAIL] SMTP provider is Brevo:', isBrevo);
     return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+      host,
+      port,
+      secure: false,
+      pool: false,
+      auth: { user, pass },
+      tls: { rejectUnauthorized: false },
+      connectionTimeout: 20000,
+      socketTimeout: 30000,
     });
   }
 
-  return nodemailer.createTransport({
-    jsonTransport: true,
-  });
+  console.warn('SMTP credentials not configured. Falling back to console email logger. Configure SMTP_* env vars for production.');
+  return nodemailer.createTransport({ jsonTransport: true });
 }
 
 const mailTransport = createMailTransport();
 
-// Helper function to send email via Resend or fallback to SMTP
+// Helper function to send email: try SMTP, fallback to Brevo API
 async function sendEmail({ to, subject, html }) {
-  const from = process.env.RESEND_FROM || 'Glimmr <onboarding@resend.dev>';
-  
+  const fromEmail = process.env.BREVO_FROM_EMAIL || 'noreply@glimmr.com';
+  const fromName = 'Glimmr';
+
   console.log('[ORDER_EMAIL] Attempting to send...');
   console.log('[ORDER_EMAIL] To:', to);
-  console.log('[ORDER_EMAIL] From:', from);
+  console.log('[ORDER_EMAIL] From:', fromEmail);
   console.log('[ORDER_EMAIL] Subject:', subject);
-  console.log('[ORDER_EMAIL] Using Resend:', !!resendClient);
-  
-  if (resendClient) {
-    try {
-      const result = await resendClient.emails.send({ from, to, subject, html });
-      console.log('[ORDER_EMAIL] ✅ Sent via Resend successfully!');
-      console.log('[ORDER_EMAIL] Resend ID:', result?.id);
-      return result;
-    } catch (error) {
-      console.error('[ORDER_EMAIL] ❌ Resend failed:', error.message);
-      console.error('[ORDER_EMAIL] Full error:', JSON.stringify(error, null, 2));
-      throw error;
-    }
-  } else {
-    // Fallback to SMTP
-    try {
-      const result = await mailTransport.sendMail({
-        from: `Glimmr <${from}>`,
-        to,
+
+  // Try SMTP first if configured
+  try {
+    const result = await mailTransport.sendMail({
+      from: `${fromName} <${fromEmail}>`,
+      to,
+      subject,
+      html,
+    });
+    console.log('[ORDER_EMAIL] ✅ Sent via SMTP successfully:', result?.messageId || 'success');
+    return result;
+  } catch (smtpError) {
+    console.warn('[ORDER_EMAIL] SMTP failed, attempting Brevo API:', smtpError.message);
+  }
+
+  // Fallback to Brevo API if available
+  if (!process.env.BREVO_API_KEY) {
+    throw new Error('Brevo API key not configured');
+  }
+
+  try {
+    const response = await axios.post(
+      'https://api.brevo.com/v3/smtp/email',
+      {
+        sender: { email: fromEmail, name: fromName },
+        to: [{ email: to }],
         subject,
-        html
-      });
-      console.log('[EMAIL] Sent via SMTP:', result?.messageId || 'success');
-      return result;
-    } catch (error) {
-      console.error('[EMAIL] SMTP failed:', error.message);
-      throw error;
-    }
+        htmlContent: html,
+      },
+      {
+        headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json' },
+        timeout: 20000,
+      }
+    );
+    console.log('[ORDER_EMAIL] ✅ Sent via Brevo API successfully!', response.data?.messageId || response.data);
+    return response.data;
+  } catch (apiError) {
+    console.error('[ORDER_EMAIL] ❌ Brevo API failed:', apiError.response?.data || apiError.message);
+    throw apiError;
   }
 }
 
