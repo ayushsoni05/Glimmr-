@@ -233,13 +233,39 @@ async function sendOtpEmail(email, otp, context) {
     </html>
   `;
 
-  if (!resendClient) {
+  // Create Resend client if needed (same as admin endpoint)
+  let otpResendClient = resendClient;
+  if (!otpResendClient && process.env.RESEND_API_KEY) {
+    console.log('[OTP_EMAIL] Creating new Resend client instance...');
+    const { Resend } = require('resend');
+    otpResendClient = new Resend(process.env.RESEND_API_KEY);
+  }
+
+  if (!otpResendClient) {
     console.error('[OTP_EMAIL] Resend client not configured. Set RESEND_API_KEY.');
+    console.error('[OTP_EMAIL] Falling back to SMTP...');
+    // Fall back to SMTP if Resend is not available
+    if (mailTransport && mailTransport.sendMail) {
+      try {
+        const result = await mailTransport.sendMail({
+          from,
+          to: email,
+          subject,
+          html,
+          text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
+        });
+        console.log('[OTP_EMAIL] ✅ Email sent via SMTP fallback');
+        return result;
+      } catch (smtpError) {
+        console.error('[OTP_EMAIL] ❌ SMTP fallback also failed:', smtpError.message);
+        throw new Error('Email service unavailable (both Resend and SMTP failed)');
+      }
+    }
     throw new Error('Email service unavailable');
   }
 
   try {
-    const result = await resendClient.emails.send({
+    const result = await otpResendClient.emails.send({
       from,
       to: email,
       subject,
@@ -250,6 +276,24 @@ async function sendOtpEmail(email, otp, context) {
     return result;
   } catch (error) {
     console.error('[OTP_EMAIL] ❌ Resend send failed:', error && error.message ? error.message : error);
+    console.error('[OTP_EMAIL] Attempting SMTP fallback...');
+    // Try SMTP fallback
+    if (mailTransport && mailTransport.sendMail) {
+      try {
+        const result = await mailTransport.sendMail({
+          from,
+          to: email,
+          subject,
+          html,
+          text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
+        });
+        console.log('[OTP_EMAIL] ✅ Email sent via SMTP fallback after Resend failed');
+        return result;
+      } catch (smtpError) {
+        console.error('[OTP_EMAIL] ❌ SMTP fallback also failed:', smtpError.message);
+        throw new Error(`Failed to send OTP email: ${error.message}`);
+      }
+    }
     throw error;
   }
 }
