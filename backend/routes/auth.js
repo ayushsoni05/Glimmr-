@@ -293,6 +293,40 @@ async function sendOtpEmail(email, otp, context) {
     } catch (brevoError) {
       console.error('[OTP_EMAIL] ❌ Brevo API failed:', brevoError.message);
       console.error('[OTP_EMAIL] Brevo Error:', brevoError.response?.data || brevoError.message);
+      
+      // Check if it's an account activation issue
+      if (brevoError.response?.status === 403) {
+        const errorMsg = brevoError.response?.data?.message || '';
+        if (errorMsg.includes('not yet activated')) {
+          console.error('[OTP_EMAIL] ⚠️ Brevo account not yet activated. Please activate at https://app.brevo.com');
+          // Try SMTP fallback instead
+          console.log('[OTP_EMAIL] 🔄 Trying SMTP fallback...');
+        }
+      }
+      
+      // Don't throw yet - try SMTP fallback
+      if (mailTransport && mailTransport.sendMail) {
+        console.log('[OTP_EMAIL] Attempting SMTP fallback after Brevo failure...');
+        const isRealTransport = mailTransport.options && mailTransport.options.host;
+        
+        if (isRealTransport) {
+          try {
+            const result = await mailTransport.sendMail({
+              from: process.env.SMTP_USER || `${senderName} <${senderEmail}>`,
+              to: email,
+              subject,
+              html,
+              text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
+            });
+            
+            console.log('[OTP_EMAIL] ✅ Email sent via SMTP fallback!');
+            return result;
+          } catch (smtpError) {
+            console.error('[OTP_EMAIL] ❌ SMTP fallback also failed:', smtpError.message);
+          }
+        }
+      }
+      
       throw new Error(`Failed to send OTP email via Brevo: ${brevoError.message}`);
     }
   }
