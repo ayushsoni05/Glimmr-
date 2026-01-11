@@ -1404,5 +1404,44 @@ router.get('/config', async (req, res) => {
   }
 });
 
+// Test endpoint to verify email configuration
+router.get('/test-email-config', async (req, res) => {
+  try {
+    const hasResendKey = !!process.env.RESEND_API_KEY;
+    const resendKeyPreview = process.env.RESEND_API_KEY 
+      ? process.env.RESEND_API_KEY.substring(0, 7) + '...' 
+      : 'NOT SET';
+    const hasResendClient = !!resendClient;
+    const canCreateDynamicClient = hasResendKey;
+    
+    const hasSmtp = !!mailTransport;
+    const smtpConfig = {
+      host: process.env.SMTP_HOST || 'NOT SET',
+      port: process.env.SMTP_PORT || 'NOT SET',
+      user: process.env.SMTP_USER ? process.env.SMTP_USER.substring(0, 3) + '***' : 'NOT SET'
+    };
+    
+    const fromEmail = process.env.RESEND_FROM || process.env.MAIL_FROM || 'Glimmr <onboarding@resend.dev>';
+    
+    return res.json({
+      resend: {
+        apiKeySet: hasResendKey,
+        apiKeyPreview: resendKeyPreview,
+        globalClientInitialized: hasResendClient,
+        canCreateDynamicClient
+      },
+      smtp: {
+        configured: hasSmtp,
+        config: smtpConfig
+      },
+      fromEmail,
+      status: hasResendKey || hasSmtp ? 'Email service available' : 'No email service configured'
+    });
+  } catch (err) {
+    console.error('Test email config error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
