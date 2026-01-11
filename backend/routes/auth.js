@@ -3,7 +3,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
-const sgMail = require('@sendgrid/mail');
 // Twilio removed: prefer Firebase client-side phone auth
 const crypto = require('crypto');
 const admin = require('firebase-admin');
@@ -35,15 +34,6 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
 const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const mailTransport = createMailTransport();
-
-// Initialize SendGrid if API key is provided
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-  console.log('[SENDGRID] ✅ SendGrid API key configured');
-} else {
-  console.warn('[SENDGRID] API key not configured');
-}
-
 // Server-side SMS provider removed in favor of Firebase client-side phone auth
 
 // Lightweight audit log for SMS/Verify events (non-sensitive metadata)
@@ -318,60 +308,7 @@ async function sendOtpEmail(email, otp, context) {
     return result;
   } catch (error) {
     console.error('[OTP_EMAIL] ❌ Resend send failed:', error && error.message ? error.message : error);
-    console.log('[OTP_EMAIL] 🔄 Trying SendGrid fallback...');
-    
-    // Try SendGrid fallback
-    if (process.env.SENDGRID_API_KEY) {
-      try {
-        const sendgridFrom = process.env.SENDGRID_FROM_EMAIL || 'noreply@glimmr.com';
-        const sendgridName = process.env.SENDGRID_FROM_NAME || 'Glimmr';
-        
-        console.log('[OTP_EMAIL] Sending via SendGrid...');
-        const msg = {
-          to: email,
-          from: `${sendgridName} <${sendgridFrom}>`,
-          subject,
-          html,
-          text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
-        };
-        
-        const result = await sgMail.send(msg);
-        console.log('[OTP_EMAIL] ✅ Email sent via SendGrid! Status:', result[0].statusCode);
-        return { id: `sendgrid-${Date.now()}`, ...result };
-      } catch (sendgridError) {
-        console.error('[OTP_EMAIL] ❌ SendGrid failed:', sendgridError.message);
-        console.log('[OTP_EMAIL] 🔄 Trying SMTP fallback...');
-        
-        // Try SMTP fallback after SendGrid fails
-        if (mailTransport && mailTransport.sendMail) {
-          const isRealTransport = mailTransport.options && mailTransport.options.host;
-          
-          if (!isRealTransport) {
-            console.error('[OTP_EMAIL] ❌ SMTP not configured (jsonTransport mode)');
-            throw new Error('Email service unavailable: All providers failed');
-          }
-          
-          try {
-            console.log('[OTP_EMAIL] Sending via SMTP...');
-            const result = await mailTransport.sendMail({
-              from: process.env.SMTP_USER || from,
-              to: email,
-              subject,
-              html,
-              text: `Your OTP for ${context} is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes. If you did not request this, please ignore this message.`,
-            });
-            console.log('[OTP_EMAIL] ✅ Email sent via SMTP fallback! MessageID:', result.messageId);
-            return result;
-          } catch (smtpError) {
-            console.error('[OTP_EMAIL] ❌ SMTP fallback failed:', smtpError.message);
-            throw new Error(`All email services failed: ${smtpError.message}`);
-          }
-        }
-        throw new Error(`SendGrid and SMTP both unavailable: ${sendgridError.message}`);
-      }
-    }
-    
-    console.log('[OTP_EMAIL] 🔄 SendGrid not configured, trying SMTP fallback...');
+    console.log('[OTP_EMAIL] 🔄 Trying SMTP fallback...');
     
     // Try SMTP fallback
     if (mailTransport && mailTransport.sendMail) {
