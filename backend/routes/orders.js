@@ -211,15 +211,14 @@ router.post('/', async (req, res) => {
     // Send notifications asynchronously (fire and forget - don't block response)
     setImmediate(async () => {
       try {
+        // Send order status notification to customer (supports guest via shipping email)
+        await notifyOrderStatusChange(order._id, 'confirmed').catch(err => 
+          console.error('Failed to send order status notification:', err.message)
+        );
+
         let user = null;
         if (userId) {
           user = await User.findById(userId);
-          if (user) {
-            // Send order status notification to customer
-            await notifyOrderStatusChange(order._id, 'confirmed').catch(err => 
-              console.error('Failed to send order status notification:', err.message)
-            );
-          }
         }
         
         // Send admin notification about new order (for ALL orders - guest or logged-in)

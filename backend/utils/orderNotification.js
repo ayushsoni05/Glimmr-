@@ -808,12 +808,22 @@ async function notifyOrderStatusChange(orderId, newStatus) {
     
     const order = await Order.findById(orderId).populate('user').populate('items.product');
     
-    if (!order || !order.user) {
-      console.error('[NOTIFY_STATUS] Order or user not found');
+    if (!order) {
+      console.error('[NOTIFY_STATUS] Order not found');
       return;
     }
 
-    const user = order.user;
+    // Support guest orders by using shipping address as contact
+    const user = order.user || {
+      name: order.shippingAddress?.name || 'Guest Customer',
+      email: order.shippingAddress?.email,
+      phone: order.shippingAddress?.phone,
+    };
+
+    if (!user || !user.email) {
+      console.error('[NOTIFY_STATUS] No user email available to send notification');
+      return;
+    }
     console.log('[NOTIFY_STATUS] User email:', user?.email);
 
     // Ensure legacy orders have required structures
