@@ -6,7 +6,7 @@
 ![MERN Stack](https://img.shields.io/badge/Stack-MERN-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
-**A modern, full-stack jewelry e-commerce platform with AI-powered recommendations, dynamic pricing, and seamless payment integration.**
+**A modern, full-stack jewelry e-commerce platform with dynamic pricing, multi-image galleries, seamless payment integration, and AI-powered recommendations coming soon.**
 
 [Features](#-features) • [Architecture](#-architecture) • [Installation](#-installation) • [API Documentation](#-api-documentation) • [Contributing](#-contributing)
 
@@ -44,13 +44,13 @@ The jewelry industry requires unique considerations that standard e-commerce pla
 - **Dynamic Pricing**: Jewelry prices fluctuate with precious metal and gemstone market rates. Glimmrr automatically calculates product prices based on real-time gold, silver, and diamond pricing.
 - **Visual Appeal**: High-quality product imagery and 3D visualization capabilities using Three.js/React Three Fiber to showcase jewelry from every angle.
 - **Trust & Security**: Multiple authentication methods including traditional email/password, phone OTP verification, and Firebase authentication ensure customer trust.
-- **Personalization**: AI-powered recommendation engine that learns customer preferences and suggests relevant products.
+- **Personalization**: Multi-image carousel galleries and responsive design for better product visualization (AI recommendations coming soon).
 - **Business Intelligence**: Comprehensive admin dashboard with analytics, inventory management, and order tracking.
 
 ### Key Highlights
 
 - 🛍️ **Customer-Centric Experience**: Intuitive product browsing with advanced filtering, category navigation, search functionality, and personalized collections
-- 🤖 **AI-Powered Recommendations**: OpenAI GPT integration provides intelligent product suggestions based on user preferences, budget, and occasion
+- 🖼️ **Multi-Image Galleries**: Sliding photo carousels with prev/next controls and thumbnail navigation for better product visualization
 - 💰 **Dynamic Pricing Engine**: Real-time calculation of product prices based on current gold (22K, 24K, 18K), silver, and diamond market rates with automatic updates
 - 🔐 **Multi-Layer Security**: Firebase Authentication, JWT tokens, token blacklisting, rate limiting, and bcrypt password hashing for comprehensive security
 - 💳 **Seamless Payments**: Stripe payment gateway integration with support for multiple payment methods and automatic invoice generation
@@ -71,7 +71,7 @@ The jewelry industry requires unique considerations that standard e-commerce pla
 | 🔍 **Product Discovery** | Browse by category (rings, necklaces, earrings, etc.), filter by material, price, and more |
 | 🛒 **Shopping Cart** | Add/remove items, update quantities, save for later |
 | ❤️ **Wishlist** | Save favorite products for future purchases |
-| 🤖 **AI Recommendations** | Get personalized product suggestions based on preferences |
+| 🖼️ **Image Galleries** | View multiple product images with sliding carousel and thumbnail navigation |
 | 💎 **Live Pricing** | Real-time gold, silver, and diamond price updates |
 | 🔐 **Authentication** | Email/password, OTP-based phone authentication via Firebase |
 | 👤 **User Profile** | Manage personal info, addresses, order history |
@@ -124,7 +124,7 @@ JWT                 - Token-based authentication
 Bcrypt.js           - Password hashing
 Multer              - File upload handling
 Stripe API          - Payment gateway
-OpenAI API          - AI recommendations
+OpenAI API          - AI recommendations (Future Enhancement)
 Fast2SMS            - OTP service
 Nodemailer          - Email notifications
 Express Rate Limit  - API rate limiting
